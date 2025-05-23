@@ -1,0 +1,8 @@
+
+
+> @discourse-graphs/obsidian@0.1.0 build
+> tsx scripts/build.ts
+
+Compiling ...
+built with 0 errors
+Compiling complete
