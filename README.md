@@ -16,7 +16,6 @@ For more information about Discourse Graphs, check out our website at [https://d
 ![BRAT](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2Faar5LKpLOk.png?alt=media&token=6f51ac48-19d3-4bb5-9a07-7b32cfa6afe6)
 4. Install BRAT and enable it
 
-
 #### Install DataCore via BRAT
 
 1. Open Obsidian Settings
@@ -51,6 +50,25 @@ For more information about Discourse Graphs, check out our website at [https://d
    - Under "Node Types," click "Add Node Type"
    - Enter a name for your node type (e.g., "Claim", "Evidence", "Question")
    - Add the format for your node type. eg a claim node will have page title "CLM - {content}"
+   - **Template (Optional)**: Select a template from the dropdown to automatically apply template content when creating nodes of this type
+     - Templates are sourced from Obsidian's core Templates plugin
+     - Ensure you have the Templates plugin enabled and configured with a template folder
+     - The dropdown will show all available template files from your configured template folder
+
+      ![add node types with template](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FHMg_Tq6qiR.png?alt=media&token=69828bfc-c939-41b0-abd4-2cc8931c5a38)
+     - Click "Save Changes"
+
+    
+- To create a new template:
+  + Create new folder to store templates
+  ![new folder](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FyTtJ1a0iI2.png?alt=media&token=b5d09b10-f170-47cd-a239-ee5f7acd89dc)
+
+  + Specify template folder location in plugin settings menu
+  ![template](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FhzZg_GJXY9.png?alt=media&token=508c8d19-1f13-4fb3-adf1-898dcf694f08)
+
+  + Create new file in template folder (A) and add text to file (B)
+  ![create template file](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FtTr9vOnXnX.png?alt=media&token=dda1fe25-3ccf-42b4-8f3c-1cd29f82c3f7)
+
   ![add node types](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FYRZ6ocI_d-.png?alt=media&token=c623bec7-02bd-42b4-a994-cd1c40a54d82)
   - Click "Save Changes"
 #### Edit Relation Types
@@ -68,7 +86,6 @@ For more information about Discourse Graphs, check out our website at [https://d
 - Once you see the source, relation, and target selected:
 ![final relations](https://firebasestorage.googleapis.com/v0/b/firescript-577a2.appspot.com/o/imgs%2Fapp%2Fdiscourse-graphs%2FycPW-N-rY8.png?alt=media&token=54867be2-9030-4c6c-82d2-b96069e52d81)
 E.g: this means that *Claim* nodes can supports *Questions* nodes
-<br/>
 - Click "Save changes"
 
 ## Using Discourse Graphs

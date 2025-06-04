@@ -4,16 +4,18 @@ import path from "path";
 import { exec } from "child_process";
 import util from "util";
 import { Octokit } from "@octokit/core";
-import os from "os";
+import os, { version } from "os";
 
 dotenv.config();
 
 const execPromise = util.promisify(exec);
+const TARGET_REPO = "DiscourseGraphs/discourse-graph-obsidian";
+const OWNER = "DiscourseGraphs";
+const REPO = "discourse-graph-obsidian";
 
 type PublishConfig = {
   version: string;
   createRelease: boolean;
-  targetRepo: string;
   isPrerelease: boolean;
   releaseName?: string;
 };
@@ -47,10 +49,6 @@ const REQUIRED_BUILD_FILES = [
   "styles.css",
 ] as const;
 
-const TARGET_REPO = "DiscourseGraphs/discourse-graph-obsidian";
-const OWNER = "DiscourseGraphs";
-const REPO = "discourse-graph-obsidian";
-
 const log = (message: string): void => {
   console.log(`[Obsidian Publisher] ${message}`);
 };
@@ -61,90 +59,6 @@ const getEnvVar = (name: string): string => {
     throw new Error(`${name} environment variable is required`);
   }
   return value || "";
-};
-
-const parseArgs = (): PublishConfig => {
-  const args = process.argv.slice(2);
-  const config: Partial<PublishConfig> = {
-    createRelease: false,
-    targetRepo: TARGET_REPO,
-    isPrerelease: true,
-  };
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    const nextArg = args[i + 1];
-
-    switch (arg) {
-      case "--version":
-      case "-v":
-        if (!nextArg || nextArg.startsWith("-")) {
-          throw new Error("Version argument is required after --version");
-        }
-        config.version = nextArg;
-        i++;
-        break;
-      case "--create-release":
-      case "-r":
-        config.createRelease = true;
-        break;
-      case "--target-repo":
-        if (!nextArg || nextArg.startsWith("-")) {
-          throw new Error(
-            "Repository argument is required after --target-repo",
-          );
-        }
-        config.targetRepo = nextArg;
-        i++;
-        break;
-      case "--stable":
-        config.isPrerelease = false;
-        break;
-      case "--release-name":
-        if (!nextArg || nextArg.startsWith("-")) {
-          throw new Error(
-            "Release name argument is required after --release-name",
-          );
-        }
-        config.releaseName = nextArg;
-        i++;
-        break;
-      case "--help":
-      case "-h":
-        showHelp();
-        process.exit(0);
-    }
-  }
-
-  if (!config.version) {
-    throw new Error("Version is required. Use --version <version> or --help");
-  }
-
-  validateVersion(config.version);
-
-  // Internal releases are pre-release by default
-  if (!args.includes("--stable")) {
-    config.isPrerelease = !isExternalRelease(config.version);
-  }
-
-  return config as PublishConfig;
-};
-
-const validateVersion = (version: string): void => {
-  const basicVersionPattern = /^\d+\.\d+\.\d+/;
-
-  if (!basicVersionPattern.test(version)) {
-    throw new Error(
-      `Invalid version format: ${version}. Expected format: x.y.z, x.y.z-suffix, or x.y.z-custom-name`,
-    );
-  }
-};
-
-const isExternalRelease = (version: string): boolean => {
-  // Official SemVer regex from https://semver.org/#semantic-versioning-specification-semver
-  const semverRegex =
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
-  return semverRegex.test(version);
 };
 
 const showHelp = (): void => {
@@ -181,6 +95,111 @@ Examples:
   # Stable release (uses default name)
   tsx scripts/publish-obsidian.ts --version 1.0.0 --stable --create-release
 `);
+};
+
+const validateVersion = (version: string): void => {
+  const basicVersionPattern = /^\d+\.\d+\.\d+/;
+
+  if (!basicVersionPattern.test(version)) {
+    throw new Error(
+      `Invalid version format: ${version}. Expected format: x.y.z, x.y.z-suffix, or x.y.z-custom-name`,
+    );
+  }
+};
+
+const isExternalRelease = (version: string): boolean => {
+  // Official SemVer regex from https://semver.org/#semantic-versioning-specification-semver
+  const semverRegex =
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+  return semverRegex.test(version);
+};
+
+const processVersionArgument = (
+  args: string[],
+  i: number,
+): { version: string; nextIndex: number } => {
+  const nextArg = args[i + 1];
+  if (!nextArg || nextArg.startsWith("-")) {
+    throw new Error("Version argument is required after --version");
+  }
+  return { version: nextArg, nextIndex: i + 1 };
+};
+
+const processReleaseNameArgument = (
+  args: string[],
+  i: number,
+): { releaseName: string; nextIndex: number } => {
+  const nextArg = args[i + 1];
+  if (!nextArg || nextArg.startsWith("-")) {
+    throw new Error("Release name argument is required after --release-name");
+  }
+  return { releaseName: nextArg, nextIndex: i + 1 };
+};
+
+const handleCommandLineArgument = (
+  arg: string,
+  args: string[],
+  i: number,
+  config: Partial<PublishConfig>,
+): number => {
+  switch (arg) {
+    case "--version":
+    case "-v": {
+      const { version, nextIndex } = processVersionArgument(args, i);
+      config.version = version;
+      return nextIndex;
+    }
+    case "--create-release":
+    case "-r":
+      config.createRelease = true;
+      return i;
+    case "--stable":
+      config.isPrerelease = false;
+      return i;
+    case "--release-name": {
+      const { releaseName, nextIndex } = processReleaseNameArgument(args, i);
+      config.releaseName = releaseName;
+      return nextIndex;
+    }
+    case "--help":
+    case "-h":
+      showHelp();
+      process.exit(0);
+    default:
+      return i;
+  }
+};
+
+const determineReleaseType = (version: string, args: string[]): boolean => {
+  // Internal releases are pre-release by default
+  if (!args.includes("--stable")) {
+    return !isExternalRelease(version);
+  }
+  return false;
+};
+
+const parseArgs = (): PublishConfig => {
+  const args = process.argv.slice(2);
+  const config: Partial<PublishConfig> = {
+    createRelease: false,
+    isPrerelease: true,
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const currentArg = args[i];
+    if (currentArg) {
+      i = handleCommandLineArgument(currentArg, args, i, config);
+    }
+  }
+
+  if (!config.version) {
+    throw new Error("Version is required. Use --version <version> or --help");
+  }
+
+  validateVersion(config.version);
+  config.isPrerelease = determineReleaseType(config.version, args);
+
+  return config as PublishConfig;
 };
 
 const execCommand = async (
@@ -253,12 +272,7 @@ const copyDirectory = (src: string, dest: string, baseDir: string): void => {
   });
 };
 
-const buildPlugin = async (dir: string): Promise<void> => {
-  log("Building plugin...");
-
-  await execCommand("npm run build", { cwd: dir });
-
-  const buildDir = path.join(dir, "dist");
+const validateBuildFiles = (buildDir: string): void => {
   const missingFiles = REQUIRED_BUILD_FILES.filter(
     (file) => !fs.existsSync(path.join(buildDir, file)),
   );
@@ -266,6 +280,14 @@ const buildPlugin = async (dir: string): Promise<void> => {
   if (missingFiles.length > 0) {
     throw new Error(`Required build files missing: ${missingFiles.join(", ")}`);
   }
+};
+
+const buildPlugin = async (dir: string): Promise<void> => {
+  log("Building plugin...");
+  await execCommand("npm run build", { cwd: dir });
+
+  const buildDir = path.join(dir, "dist");
+  validateBuildFiles(buildDir);
 };
 
 const updateManifest = (tempDir: string, version: string): void => {
@@ -292,137 +314,198 @@ const copyBuildFiles = (buildDir: string, tempDir: string): void => {
   });
 };
 
+const createOctokitClient = (): Octokit => {
+  const token = getEnvVar("OBSIDIAN_PLUGIN_REPO_TOKEN");
+  return new Octokit({ auth: token });
+};
+
+const getCurrentBranchReference = async (octokit: Octokit): Promise<string> => {
+  const { data: ref } = await octokit.request(
+    "GET /repos/{owner}/{repo}/git/refs/{ref}",
+    {
+      owner: OWNER,
+      repo: REPO,
+      ref: "heads/main",
+    },
+  );
+
+  if (!ref?.object?.sha) {
+    throw new Error("Failed to get main branch reference");
+  }
+  return ref.object.sha;
+};
+
+const getCurrentCommitTreeSha = async (
+  octokit: Octokit,
+  commitSha: string,
+): Promise<string> => {
+  const { data: currentCommit } = await octokit.request(
+    "GET /repos/{owner}/{repo}/git/commits/{commit_sha}",
+    {
+      owner: OWNER,
+      repo: REPO,
+      commit_sha: commitSha,
+    },
+  );
+
+  if (!currentCommit?.tree?.sha) {
+    throw new Error("Failed to get current commit tree");
+  }
+  return currentCommit.tree.sha;
+};
+
+const getAllFilesRecursively = (
+  dir: string,
+  baseDir: string = dir,
+): string[] => {
+  const files: string[] = [];
+
+  fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
+    const fullPath = path.join(dir, entry.name);
+    const relativePath = path.relative(baseDir, fullPath);
+
+    if (shouldExclude(fullPath, baseDir)) {
+      log(`Excluding: ${relativePath}`);
+      return;
+    }
+
+    if (entry.isDirectory()) {
+      files.push(...getAllFilesRecursively(fullPath, baseDir));
+    } else {
+      files.push(relativePath);
+    }
+  });
+
+  return files;
+};
+
+const createGitBlob = async (
+  octokit: Octokit,
+  filePath: string,
+  tempDir: string,
+) => {
+  const fullPath = path.join(tempDir, filePath);
+  const content = fs.readFileSync(fullPath);
+
+  const { data: blob } = await octokit.request(
+    "POST /repos/{owner}/{repo}/git/blobs",
+    {
+      owner: OWNER,
+      repo: REPO,
+      content: content.toString("base64"),
+      encoding: "base64",
+    },
+  );
+
+  if (!blob?.sha) {
+    throw new Error(`Failed to create blob for ${filePath}`);
+  }
+
+  return {
+    path: filePath.replace(/\\/g, "/"), // Normalize path separators for GitHub
+    sha: blob.sha,
+  };
+};
+
+const createAllGitBlobs = async (
+  octokit: Octokit,
+  files: string[],
+  tempDir: string,
+) => {
+  const blobPromises = files.map((filePath) =>
+    createGitBlob(octokit, filePath, tempDir),
+  );
+  return Promise.all(blobPromises);
+};
+
+const createNewGitTree = async (
+  octokit: Octokit,
+  blobs: Array<{ path: string; sha: string }>,
+  baseTreeSha: string,
+) => {
+  const { data: newTree } = await octokit.request(
+    "POST /repos/{owner}/{repo}/git/trees",
+    {
+      owner: OWNER,
+      repo: REPO,
+      base_tree: baseTreeSha,
+      tree: blobs.map((blob) => ({
+        path: blob.path,
+        mode: "100644" as const,
+        type: "blob" as const,
+        sha: blob.sha,
+      })),
+    },
+  );
+
+  if (!newTree?.sha) {
+    throw new Error("Failed to create new tree");
+  }
+  return newTree.sha;
+};
+
+const createCommitFromTree = async (
+  octokit: Octokit,
+  treeSha: string,
+  parentSha: string,
+  version: string,
+) => {
+  const { data: newCommit } = await octokit.request(
+    "POST /repos/{owner}/{repo}/git/commits",
+    {
+      owner: OWNER,
+      repo: REPO,
+      message: `Release v${version}`,
+      tree: treeSha,
+      parents: [parentSha],
+    },
+  );
+
+  if (!newCommit?.sha) {
+    throw new Error("Failed to create new commit");
+  }
+  return newCommit.sha;
+};
+
+const updateMainBranchReference = async (
+  octokit: Octokit,
+  newCommitSha: string,
+) => {
+  await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
+    owner: OWNER,
+    repo: REPO,
+    ref: "heads/main",
+    sha: newCommitSha,
+  });
+};
+
 const updateMainBranch = async (
   tempDir: string,
   version: string,
 ): Promise<void> => {
   log(`Updating main branch of repository: ${TARGET_REPO}...`);
 
-  const token = getEnvVar("OBSIDIAN_PLUGIN_REPO_TOKEN");
-  const octokit = new Octokit({ auth: token });
+  const octokit = createOctokitClient();
 
   try {
-    const { data: ref } = await octokit.request(
-      "GET /repos/{owner}/{repo}/git/refs/{ref}",
-      {
-        owner: OWNER,
-        repo: REPO,
-        ref: "heads/main",
-      },
-    );
+    const currentSha = await getCurrentBranchReference(octokit);
+    const currentTreeSha = await getCurrentCommitTreeSha(octokit, currentSha);
 
-    if (!ref?.object?.sha) {
-      throw new Error("Failed to get main branch reference");
-    }
-    const currentSha = ref.object.sha;
-
-    const { data: currentCommit } = await octokit.request(
-      "GET /repos/{owner}/{repo}/git/commits/{commit_sha}",
-      {
-        owner: OWNER,
-        repo: REPO,
-        commit_sha: currentSha,
-      },
-    );
-
-    if (!currentCommit?.tree?.sha) {
-      throw new Error("Failed to get current commit tree");
-    }
-    const currentTreeSha = currentCommit.tree.sha;
-
-    const getAllFiles = (dir: string, baseDir: string = dir): string[] => {
-      const files: string[] = [];
-
-      fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
-        const fullPath = path.join(dir, entry.name);
-        const relativePath = path.relative(baseDir, fullPath);
-
-        if (shouldExclude(fullPath, baseDir)) {
-          log(`Excluding: ${relativePath}`);
-          return;
-        }
-
-        if (entry.isDirectory()) {
-          files.push(...getAllFiles(fullPath, baseDir));
-        } else {
-          files.push(relativePath);
-        }
-      });
-
-      return files;
-    };
-
-    const allFiles = getAllFiles(tempDir);
+    const allFiles = getAllFilesRecursively(tempDir);
     log(`Found ${allFiles.length} files to update`);
 
-    const blobPromises = allFiles.map(async (filePath) => {
-      const fullPath = path.join(tempDir, filePath);
-      const content = fs.readFileSync(fullPath);
-
-      const { data: blob } = await octokit.request(
-        "POST /repos/{owner}/{repo}/git/blobs",
-        {
-          owner: OWNER,
-          repo: REPO,
-          content: content.toString("base64"),
-          encoding: "base64",
-        },
-      );
-
-      if (!blob?.sha) {
-        throw new Error(`Failed to create blob for ${filePath}`);
-      }
-
-      return {
-        path: filePath.replace(/\\/g, "/"), // Normalize path separators for GitHub
-        sha: blob.sha,
-      };
-    });
-
-    const blobs = await Promise.all(blobPromises);
-
-    const { data: newTree } = await octokit.request(
-      "POST /repos/{owner}/{repo}/git/trees",
-      {
-        owner: OWNER,
-        repo: REPO,
-        base_tree: currentTreeSha,
-        tree: blobs.map((blob) => ({
-          path: blob.path,
-          mode: "100644" as const,
-          type: "blob" as const,
-          sha: blob.sha,
-        })),
-      },
+    const blobs = await createAllGitBlobs(octokit, allFiles, tempDir);
+    const newTreeSha = await createNewGitTree(octokit, blobs, currentTreeSha);
+    const newCommitSha = await createCommitFromTree(
+      octokit,
+      newTreeSha,
+      currentSha,
+      version,
     );
 
-    if (!newTree?.sha) {
-      throw new Error("Failed to create new tree");
-    }
+    await updateMainBranchReference(octokit, newCommitSha);
 
-    const { data: newCommit } = await octokit.request(
-      "POST /repos/{owner}/{repo}/git/commits",
-      {
-        owner: OWNER,
-        repo: REPO,
-        message: `Release v${version}`,
-        tree: newTree.sha,
-        parents: [currentSha],
-      },
-    );
-
-    if (!newCommit?.sha) {
-      throw new Error("Failed to create new commit");
-    }
-
-    await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
-      owner: OWNER,
-      repo: REPO,
-      ref: "heads/main",
-      sha: newCommit.sha,
-    });
-
-    log(`Successfully updated main branch with commit: ${newCommit.sha}`);
+    log(`Successfully updated main branch with commit: ${newCommitSha}`);
     log(`Updated ${blobs.length} files`);
   } catch (error) {
     log(`Failed to update main branch: ${error}`);
@@ -430,24 +513,77 @@ const updateMainBranch = async (
   }
 };
 
-const createGithubRelease = async (
-  tempDir: string,
-  version: string,
-  isPrerelease: boolean,
-  releaseName?: string,
+const determineContentType = (file: string): string => {
+  const contentTypes = {
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".css": "text/css",
+  };
+  return (
+    contentTypes[path.extname(file) as keyof typeof contentTypes] ||
+    "application/octet-stream"
+  );
+};
+
+const uploadReleaseAsset = async (
+  octokit: Octokit,
+  uploadUrl: string,
+  filePath: string,
+  fileName: string,
 ): Promise<void> => {
+  const contentType = determineContentType(fileName);
+  const fileContent = fs.readFileSync(filePath);
+  const stats = fs.statSync(filePath);
+  const formattedUploadUrl = uploadUrl.replace(
+    "{?name,label}",
+    `?name=${fileName}`,
+  );
+
+  await octokit.request(`POST ${formattedUploadUrl}`, {
+    headers: {
+      "content-type": contentType,
+      "content-length": String(stats.size),
+    },
+    data: fileContent,
+    name: fileName,
+  });
+
+  log(`Uploaded ${fileName}`);
+};
+
+const uploadAllReleaseAssets = async (
+  octokit: Octokit,
+  uploadUrl: string,
+  tempDir: string,
+): Promise<void> => {
+  for (const file of REQUIRED_BUILD_FILES) {
+    const filePath = path.join(tempDir, file);
+    if (!fs.existsSync(filePath)) continue;
+
+    await uploadReleaseAsset(octokit, uploadUrl, filePath, file);
+  }
+};
+
+const createGithubRelease = async ({
+  tempDir,
+  version,
+  isPrerelease,
+  releaseName,
+}: {
+  tempDir: string;
+  version: string;
+  isPrerelease: boolean;
+  releaseName?: string;
+}): Promise<void> => {
   log("Creating GitHub release...");
 
-  const token = getEnvVar("OBSIDIAN_PLUGIN_REPO_TOKEN");
-  const octokit = new Octokit({ auth: token });
-  const owner = OWNER;
-  const repo = REPO;
+  const octokit = createOctokitClient();
   const tagName = `v${version}`;
   const releaseTitle = releaseName || `Discourse Graph v${version}`;
 
   const release = await octokit.request("POST /repos/{owner}/{repo}/releases", {
-    owner,
-    repo,
+    owner: OWNER,
+    repo: REPO,
     tag_name: tagName,
     name: releaseTitle,
     prerelease: isPrerelease,
@@ -458,35 +594,48 @@ const createGithubRelease = async (
     throw new Error("Failed to get upload URL from release response");
   }
 
-  for (const file of REQUIRED_BUILD_FILES) {
-    const filePath = path.join(tempDir, file);
-    if (!fs.existsSync(filePath)) continue;
+  await uploadAllReleaseAssets(octokit, release.data.upload_url, tempDir);
+};
 
-    const contentType =
-      {
-        ".js": "application/javascript",
-        ".json": "application/json",
-        ".css": "text/css",
-      }[path.extname(file)] || "application/octet-stream";
-
-    const fileContent = fs.readFileSync(filePath);
-    const stats = fs.statSync(filePath);
-    const uploadUrl = release.data.upload_url.replace(
-      "{?name,label}",
-      `?name=${file}`,
-    );
-
-    await octokit.request(`POST ${uploadUrl}`, {
-      headers: {
-        "content-type": contentType,
-        "content-length": String(stats.size),
-      },
-      data: fileContent,
-      name: file,
-    });
-
-    log(`Uploaded ${file}`);
+const ensureCleanTempDirectory = (tempDir: string): void => {
+  if (fs.existsSync(tempDir)) {
+    fs.rmSync(tempDir, { recursive: true });
   }
+};
+
+const shouldUpdateMainBranch = (
+  isExternal: boolean,
+  isPrerelease: boolean,
+): boolean => {
+  return isExternal && !isPrerelease;
+};
+
+const prepareReleaseAssets = (
+  buildDir: string,
+  obsidianDir: string,
+  version: string,
+): string => {
+  const releaseTempDir = path.join(os.tmpdir(), "temp-obsidian-release-assets");
+
+  ensureCleanTempDirectory(releaseTempDir);
+  fs.mkdirSync(releaseTempDir, { recursive: true });
+
+  copyBuildFiles(buildDir, releaseTempDir);
+
+  const manifestSrc = path.join(obsidianDir, "manifest.json");
+  const manifestDest = path.join(releaseTempDir, "manifest.json");
+  fs.copyFileSync(manifestSrc, manifestDest);
+  updateManifest(releaseTempDir, version);
+
+  return releaseTempDir;
+};
+
+const cleanupTempDirectories = (...dirs: string[]): void => {
+  dirs.forEach((dir) => {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true });
+    }
+  });
 };
 
 const publish = async (config: PublishConfig): Promise<void> => {
@@ -502,14 +651,11 @@ const publish = async (config: PublishConfig): Promise<void> => {
 
     await buildPlugin(obsidianDir);
 
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true });
-    }
-
+    ensureCleanTempDirectory(tempDir);
     copyDirectory(obsidianDir, tempDir, obsidianDir);
     copyBuildFiles(buildDir, tempDir);
 
-    if (isExternal && !isPrerelease) {
+    if (shouldUpdateMainBranch(isExternal, isPrerelease)) {
       updateManifest(tempDir, version);
       await updateMainBranch(tempDir, version);
     } else {
@@ -517,31 +663,20 @@ const publish = async (config: PublishConfig): Promise<void> => {
     }
 
     if (createRelease) {
-      const releaseTempDir = path.join(
-        os.tmpdir(),
-        "temp-obsidian-release-assets",
+      const releaseTempDir = prepareReleaseAssets(
+        buildDir,
+        obsidianDir,
+        version,
       );
 
-      if (fs.existsSync(releaseTempDir)) {
-        fs.rmSync(releaseTempDir, { recursive: true });
-      }
-
-      fs.mkdirSync(releaseTempDir, { recursive: true });
-      copyBuildFiles(buildDir, releaseTempDir);
-
-      const manifestSrc = path.join(obsidianDir, "manifest.json");
-      const manifestDest = path.join(releaseTempDir, "manifest.json");
-      fs.copyFileSync(manifestSrc, manifestDest);
-      updateManifest(releaseTempDir, version);
-
-      await createGithubRelease(
-        releaseTempDir,
+      await createGithubRelease({
+        tempDir: releaseTempDir,
         version,
         isPrerelease,
-        config.releaseName,
-      );
+        releaseName: config.releaseName,
+      });
 
-      fs.rmSync(releaseTempDir, { recursive: true });
+      cleanupTempDirectories(releaseTempDir);
     }
 
     log("Publication completed successfully!");
@@ -549,9 +684,7 @@ const publish = async (config: PublishConfig): Promise<void> => {
     log(`Publication failed: ${error}`);
     throw error;
   } finally {
-    if (fs.existsSync(tempDir)) {
-      fs.rmSync(tempDir, { recursive: true });
-    }
+    cleanupTempDirectories(tempDir);
   }
 };
 
