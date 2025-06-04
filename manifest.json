@@ -1,7 +1,7 @@
 {
   "id": "discourse-graphs",
   "name": "Discourse Graph",
-  "version": "0.1.0-alpha-publish-test.1",
+  "version": "0.1.0-beta.6",
   "minAppVersion": "1.7.0",
   "description": "Discourse Graph Plugin for Obsidian",
   "author": "Discourse Graphs",
