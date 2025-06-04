@@ -1,5 +1,3 @@
-#!/usr/bin/env tsx
-
 import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
@@ -17,6 +15,7 @@ type PublishConfig = {
   createRelease: boolean;
   targetRepo: string;
   isPrerelease: boolean;
+  releaseName?: string;
 };
 
 type ExecOptions = {
@@ -101,6 +100,15 @@ const parseArgs = (): PublishConfig => {
       case "--stable":
         config.isPrerelease = false;
         break;
+      case "--release-name":
+        if (!nextArg || nextArg.startsWith("-")) {
+          throw new Error(
+            "Release name argument is required after --release-name",
+          );
+        }
+        config.releaseName = nextArg;
+        i++;
+        break;
       case "--help":
       case "-h":
         showHelp();
@@ -123,8 +131,6 @@ const parseArgs = (): PublishConfig => {
 };
 
 const validateVersion = (version: string): void => {
-  // We accept both valid SemVer and custom internal formats
-  // SemVer handles standard cases, custom formats are for internal releases
   const basicVersionPattern = /^\d+\.\d+\.\d+/;
 
   if (!basicVersionPattern.test(version)) {
@@ -152,6 +158,7 @@ Options:
   --create-release, -r      Create a GitHub release
   --target-repo <repo>      Target repository
   --stable                 Mark as stable release (defaults to pre-release if not specified)
+  --release-name <name>    Custom release name (defaults to "Discourse Graph v{version}")
   --help, -h               Show this help message
 
 Version Formats:
@@ -163,6 +170,16 @@ Version Formats:
 Release Type Auto-Detection:
   - Internal releases (x.y.z-feature-name): Marked as pre-release, not auto-updated by BRAT
   - External releases: Auto-updated by BRAT users if they chose "Latest" as the version
+
+Examples:
+  # Internal release with custom name
+  tsx scripts/publish-obsidian.ts --version 0.1.0-canvas --release-name "Canvas Integration Feature" --create-release
+  
+  # Beta release with feature description
+  tsx scripts/publish-obsidian.ts --version 1.0.0-beta.1 --release-name "Beta: New Graph View" --create-release
+  
+  # Stable release (uses default name)
+  tsx scripts/publish-obsidian.ts --version 1.0.0 --stable --create-release
 `);
 };
 
@@ -285,7 +302,6 @@ const updateMainBranch = async (
   const octokit = new Octokit({ auth: token });
 
   try {
-    // Get the current main branch reference
     const { data: ref } = await octokit.request(
       "GET /repos/{owner}/{repo}/git/refs/{ref}",
       {
@@ -300,7 +316,6 @@ const updateMainBranch = async (
     }
     const currentSha = ref.object.sha;
 
-    // Get the current commit to get the tree SHA
     const { data: currentCommit } = await octokit.request(
       "GET /repos/{owner}/{repo}/git/commits/{commit_sha}",
       {
@@ -315,7 +330,6 @@ const updateMainBranch = async (
     }
     const currentTreeSha = currentCommit.tree.sha;
 
-    // Get all files from tempDir
     const getAllFiles = (dir: string, baseDir: string = dir): string[] => {
       const files: string[] = [];
 
@@ -341,7 +355,6 @@ const updateMainBranch = async (
     const allFiles = getAllFiles(tempDir);
     log(`Found ${allFiles.length} files to update`);
 
-    // Create blobs for all files
     const blobPromises = allFiles.map(async (filePath) => {
       const fullPath = path.join(tempDir, filePath);
       const content = fs.readFileSync(fullPath);
@@ -368,7 +381,6 @@ const updateMainBranch = async (
 
     const blobs = await Promise.all(blobPromises);
 
-    // Create new tree with all files
     const { data: newTree } = await octokit.request(
       "POST /repos/{owner}/{repo}/git/trees",
       {
@@ -388,7 +400,6 @@ const updateMainBranch = async (
       throw new Error("Failed to create new tree");
     }
 
-    // Create new commit
     const { data: newCommit } = await octokit.request(
       "POST /repos/{owner}/{repo}/git/commits",
       {
@@ -404,7 +415,6 @@ const updateMainBranch = async (
       throw new Error("Failed to create new commit");
     }
 
-    // Update main branch reference
     await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
       owner: OWNER,
       repo: REPO,
@@ -424,6 +434,7 @@ const createGithubRelease = async (
   tempDir: string,
   version: string,
   isPrerelease: boolean,
+  releaseName?: string,
 ): Promise<void> => {
   log("Creating GitHub release...");
 
@@ -432,13 +443,13 @@ const createGithubRelease = async (
   const owner = OWNER;
   const repo = REPO;
   const tagName = `v${version}`;
+  const releaseTitle = releaseName || `Discourse Graph v${version}`;
 
-  // Create release
   const release = await octokit.request("POST /repos/{owner}/{repo}/releases", {
     owner,
     repo,
     tag_name: tagName,
-    name: `Discourse Graph v${version}`,
+    name: releaseTitle,
     prerelease: isPrerelease,
     generate_release_notes: true,
   });
@@ -447,7 +458,6 @@ const createGithubRelease = async (
     throw new Error("Failed to get upload URL from release response");
   }
 
-  // Upload assets
   for (const file of REQUIRED_BUILD_FILES) {
     const filePath = path.join(tempDir, file);
     if (!fs.existsSync(filePath)) continue;
@@ -480,7 +490,7 @@ const createGithubRelease = async (
 };
 
 const publish = async (config: PublishConfig): Promise<void> => {
-  const { version, createRelease, targetRepo, isPrerelease } = config;
+  const { version, createRelease, isPrerelease } = config;
   const obsidianDir = path.resolve(".");
   const buildDir = path.join(obsidianDir, "dist");
   const tempDir = path.join(os.tmpdir(), "temp-obsidian-publish");
@@ -516,17 +526,20 @@ const publish = async (config: PublishConfig): Promise<void> => {
         fs.rmSync(releaseTempDir, { recursive: true });
       }
 
-      // Copy only the required files for release assets
       fs.mkdirSync(releaseTempDir, { recursive: true });
       copyBuildFiles(buildDir, releaseTempDir);
 
-      // Copy and update manifest for release assets
       const manifestSrc = path.join(obsidianDir, "manifest.json");
       const manifestDest = path.join(releaseTempDir, "manifest.json");
       fs.copyFileSync(manifestSrc, manifestDest);
       updateManifest(releaseTempDir, version);
 
-      await createGithubRelease(releaseTempDir, version, isPrerelease);
+      await createGithubRelease(
+        releaseTempDir,
+        version,
+        isPrerelease,
+        config.releaseName,
+      );
 
       fs.rmSync(releaseTempDir, { recursive: true });
     }
