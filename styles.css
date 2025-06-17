@@ -84,6 +84,12 @@
 .flex {
   display: flex;
 }
+.max-h-\[6em\] {
+  max-height: 6em;
+}
+.min-h-\[2\.5em\] {
+  min-height: 2.5em;
+}
 .w-full {
   width: 100%;
 }
@@ -118,8 +124,14 @@
 .gap-2 {
   gap: 0.5rem;
 }
+.overflow-y-auto {
+  overflow-y: auto;
+}
 .rounded {
   border-radius: 0.25rem;
+}
+.rounded-md {
+  border-radius: 0.375rem;
 }
 .border {
   border-width: 1px;
