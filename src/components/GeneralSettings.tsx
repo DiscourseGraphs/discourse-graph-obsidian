@@ -91,8 +91,6 @@ const GeneralSettings = () => {
 
   return (
     <div className="general-settings">
-      <h3>General Settings</h3>
-
       <div className="setting-item">
         <div className="setting-item-info">
           <div className="setting-item-name">Show IDs in frontmatter</div>
@@ -123,7 +121,7 @@ const GeneralSettings = () => {
           <FolderSuggestInput
             value={nodesFolderPath}
             onChange={handleFolderPathChange}
-            placeholder="Discourse Nodes"
+            placeholder="Example: folder 1/folder"
           />
         </div>
       </div>
