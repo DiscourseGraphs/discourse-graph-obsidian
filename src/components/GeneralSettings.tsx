@@ -1,8 +1,88 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { usePlugin } from "./PluginContext";
-import { Notice } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import SuggestInput from "./SuggestInput";
+import { SLACK_LOGO, WHITE_LOGO_SVG } from "~/icons";
 
+const DOCS_URL = "https://discoursegraphs.com/docs/obsidian";
+const COMMUNITY_URL =
+  "https://join.slack.com/t/discoursegraphs/shared_invite/zt-37xklatti-cpEjgPQC0YyKYQWPNgAkEg";
+
+const InfoSection = () => {
+  const plugin = usePlugin();
+  const logoRef = useRef<HTMLDivElement>(null);
+  const communityIconRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (logoRef.current) {
+      logoRef.current.innerHTML = WHITE_LOGO_SVG;
+    }
+    if (communityIconRef.current) {
+      communityIconRef.current.innerHTML = SLACK_LOGO;
+    }
+  }, []);
+
+  return (
+    <div className="flex justify-center">
+      <div
+        className="flex w-48 flex-col items-center rounded-lg p-3"
+        style={{ background: "var(--tag-background)" }}
+      >
+        <div
+          ref={logoRef}
+          className="h-12 w-12"
+          style={{ color: "var(--interactive-accent)" }}
+        />
+        <div
+          className="font-semibold"
+          style={{ color: "var(--interactive-accent)" }}
+        >
+          Discourse Graphs
+        </div>
+
+        <a
+          href={COMMUNITY_URL}
+          className="flex items-center gap-1 text-sm no-underline hover:opacity-80"
+          style={{ color: "var(--interactive-accent)" }}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Community"
+        >
+          <div ref={communityIconRef} className="icon" />
+          <span>Community</span>
+          <span
+            className="icon"
+            ref={(el) => (el && setIcon(el, "arrow-up-right")) || undefined}
+          />
+        </a>
+        <a
+          href={DOCS_URL}
+          className="flex items-center gap-1 text-sm no-underline hover:opacity-80"
+          style={{ color: "var(--interactive-accent)" }}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Docs"
+        >
+          <div
+            className="icon"
+            ref={(el) => (el && setIcon(el, "book")) || undefined}
+          />
+          <span>Docs</span>
+          <span
+            className="icon"
+            ref={(el) => (el && setIcon(el, "arrow-up-right")) || undefined}
+          />
+        </a>
+        <span
+          className="text-muted text-xs"
+          style={{ color: "var(--interactive-accent)" }}
+        >
+          {plugin.manifest.version}
+        </span>
+      </div>
+    </div>
+  );
+};
 export const FolderSuggestInput = ({
   value,
   onChange,
@@ -69,6 +149,11 @@ const GeneralSettings = () => {
   const [nodesFolderPath, setNodesFolderPath] = useState(
     plugin.settings.nodesFolderPath,
   );
+  const [canvasFolderPath, setCanvasFolderPath] = useState<string>(
+    plugin.settings.canvasFolderPath,
+  );
+  const [canvasAttachmentsFolderPath, setCanvasAttachmentsFolderPath] =
+    useState<string>(plugin.settings.canvasAttachmentsFolderPath);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const handleToggleChange = (newValue: boolean) => {
@@ -81,9 +166,24 @@ const GeneralSettings = () => {
     setHasUnsavedChanges(true);
   }, []);
 
+  const handleCanvasFolderPathChange = useCallback((newValue: string) => {
+    setCanvasFolderPath(newValue);
+    setHasUnsavedChanges(true);
+  }, []);
+
+  const handleCanvasAttachmentsFolderPathChange = useCallback(
+    (newValue: string) => {
+      setCanvasAttachmentsFolderPath(newValue);
+      setHasUnsavedChanges(true);
+    },
+    [],
+  );
+
   const handleSave = async () => {
     plugin.settings.showIdsInFrontmatter = showIdsInFrontmatter;
     plugin.settings.nodesFolderPath = nodesFolderPath;
+    plugin.settings.canvasFolderPath = canvasFolderPath;
+    plugin.settings.canvasAttachmentsFolderPath = canvasAttachmentsFolderPath;
     await plugin.saveSettings();
     new Notice("General settings saved");
     setHasUnsavedChanges(false);
@@ -127,8 +227,44 @@ const GeneralSettings = () => {
       </div>
 
       <div className="setting-item">
+        <div className="setting-item-info">
+          <div className="setting-item-name">Canvas folder path</div>
+          <div className="setting-item-description">
+            Folder where new Discourse Graph canvases will be created. Default:
+            &quot;Discourse Canvas&quot;.
+          </div>
+        </div>
+        <div className="setting-item-control">
+          <FolderSuggestInput
+            value={canvasFolderPath}
+            onChange={handleCanvasFolderPathChange}
+            placeholder="Example: Discourse Canvas"
+          />
+        </div>
+      </div>
+
+      <div className="setting-item">
+        <div className="setting-item-info">
+          <div className="setting-item-name">
+            Canvas attachments folder path
+          </div>
+          <div className="setting-item-description">
+            Folder where attachments for canvases are stored. Default:
+            &quot;attachments&quot;.
+          </div>
+        </div>
+        <div className="setting-item-control">
+          <FolderSuggestInput
+            value={canvasAttachmentsFolderPath}
+            onChange={handleCanvasAttachmentsFolderPathChange}
+            placeholder="Example: attachments"
+          />
+        </div>
+      </div>
+
+      <div className="setting-item">
         <button
-          onClick={handleSave}
+          onClick={() => void handleSave()}
           className={hasUnsavedChanges ? "mod-cta" : ""}
           disabled={!hasUnsavedChanges}
         >
@@ -139,6 +275,7 @@ const GeneralSettings = () => {
       {hasUnsavedChanges && (
         <div className="text-muted mt-2">You have unsaved changes</div>
       )}
+      <InfoSection />
     </div>
   );
 };

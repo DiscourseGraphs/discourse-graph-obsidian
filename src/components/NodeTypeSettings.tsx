@@ -7,6 +7,24 @@ import { DiscourseNode } from "~/types";
 import { ConfirmationModal } from "./ConfirmationModal";
 import { getTemplateFiles, getTemplatePluginInfo } from "~/utils/templates";
 
+const generateTagPlaceholder = (format: string, nodeName?: string): string => {
+  if (!format) return "Enter tag (e.g., clm-candidate or #clm-candidate)";
+
+  // Extract the prefix before " - {content}" or " -{content}" or " -{content}" etc.
+  const match = format.match(/^([A-Z]+)\s*-\s*\{content\}/i);
+  if (match && match[1]) {
+    const prefix = match[1].toLowerCase();
+    return `Enter tag (e.g., ${prefix}-candidate)`;
+  }
+
+  if (nodeName && nodeName.length >= 3) {
+    const prefix = nodeName.substring(0, 3).toLowerCase();
+    return `Enter tag (e.g., ${prefix}-candidate)`;
+  }
+
+  return "Enter tag (e.g., clm-candidate)";
+};
+
 type EditableFieldKey = keyof Omit<DiscourseNode, "id" | "shortcut">;
 
 type BaseFieldConfig = {
@@ -75,6 +93,29 @@ const FIELD_CONFIGS: Record<EditableFieldKey, BaseFieldConfig> = {
     type: "color",
     required: false,
   },
+  tag: {
+    key: "tag",
+    label: "Node tag",
+    description: "Tags that signal a line is a node candidate",
+    type: "text",
+    required: false,
+    validate: (value: string) => {
+      if (!value.trim()) return { isValid: true };
+      if (/\s/.test(value)) {
+        return { isValid: false, error: "Tag cannot contain spaces" };
+      }
+      const invalidTagChars = /[^a-zA-Z0-9-]/;
+      const invalidCharMatch = value.match(invalidTagChars);
+      if (invalidCharMatch) {
+        return {
+          isValid: false,
+          error: `Tag contains invalid character: ${invalidCharMatch[0]}. Tags can only contain letters, numbers, and dashes.`,
+        };
+      }
+
+      return { isValid: true };
+    },
+  },
 };
 
 const FIELD_CONFIG_ARRAY = Object.values(FIELD_CONFIGS);
@@ -84,20 +125,32 @@ const TextField = ({
   value,
   error,
   onChange,
+  nodeType,
 }: {
   fieldConfig: BaseFieldConfig;
   value: string;
   error?: string;
   onChange: (value: string) => void;
-}) => (
-  <input
-    type="text"
-    value={value || ""}
-    onChange={(e) => onChange(e.target.value)}
-    placeholder={fieldConfig.placeholder}
-    className={`w-full ${error ? "input-error" : ""}`}
-  />
-);
+  nodeType?: DiscourseNode;
+}) => {
+  // Generate dynamic placeholder for tag field based on node format and name
+  const getPlaceholder = (): string => {
+    if (fieldConfig.key === "tag" && nodeType?.format) {
+      return generateTagPlaceholder(nodeType.format, nodeType.name);
+    }
+    return fieldConfig.placeholder || "";
+  };
+
+  return (
+    <input
+      type="text"
+      value={value || ""}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={getPlaceholder()}
+      className={`w-full ${error ? "input-error" : ""}`}
+    />
+  );
+};
 
 const ColorField = ({
   value,
@@ -163,8 +216,12 @@ const FieldWrapper = ({
       <div className="setting-item-description">{fieldConfig.description}</div>
     </div>
     <div className="setting-item-control">
-      {children}
-      {error && <div className="text-error mt-1 text-xs">{error}</div>}
+      <div className="flex flex-col">
+        {children}
+        <div className="mt-1 min-h-[1rem] text-xs">
+          {error && <div className="text-error">{error}</div>}
+        </div>
+      </div>
     </div>
   </div>
 );
@@ -256,6 +313,7 @@ const NodeTypeSettings = () => {
       name: "",
       format: "",
       template: "",
+      tag: "",
     };
     setEditingNodeType(newNodeType);
     setSelectedNodeIndex(nodeTypes.length);
@@ -382,7 +440,11 @@ const NodeTypeSettings = () => {
       handleNodeTypeChange(fieldConfig.key, newValue);
 
     return (
-      <FieldWrapper fieldConfig={fieldConfig} error={error} key={fieldConfig.key}>
+      <FieldWrapper
+        fieldConfig={fieldConfig}
+        error={error}
+        key={fieldConfig.key}
+      >
         {fieldConfig.key === "template" ? (
           <TemplateField
             value={value}
@@ -399,6 +461,7 @@ const NodeTypeSettings = () => {
             value={value}
             error={error}
             onChange={handleChange}
+            nodeType={editingNodeType}
           />
         )}
       </FieldWrapper>
@@ -418,14 +481,14 @@ const NodeTypeSettings = () => {
         >
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-            {nodeType.color && (
-              <div
-                className="h-4 w-4 rounded-full"
-                style={{ backgroundColor: nodeType.color }}
-              />
-            )}
-            <span>{nodeType.name}</span>
-          </div>
+              {nodeType.color && (
+                <div
+                  className="h-4 w-4 rounded-full"
+                  style={{ backgroundColor: nodeType.color }}
+                />
+              )}
+              <span>{nodeType.name}</span>
+            </div>
             <div className="flex gap-2">
               <button
                 className="icon-button"
@@ -437,7 +500,7 @@ const NodeTypeSettings = () => {
               >
                 <div
                   className="icon"
-                  ref={(el) => el && setIcon(el, "pencil")}
+                  ref={(el) => (el && setIcon(el, "pencil")) || undefined}
                 />
               </button>
               <button
@@ -450,7 +513,7 @@ const NodeTypeSettings = () => {
               >
                 <div
                   className="icon"
-                  ref={(el) => el && setIcon(el, "trash")}
+                  ref={(el) => (el && setIcon(el, "trash")) || undefined}
                 />
               </button>
             </div>
@@ -476,7 +539,7 @@ const NodeTypeSettings = () => {
           >
             <div
               className="icon"
-              ref={(el) => el && setIcon(el, "arrow-left")}
+              ref={(el) => (el && setIcon(el, "arrow-left")) || undefined}
             />
           </button>
           <h3 className="dg-h3">Edit Node Type</h3>
