@@ -68,6 +68,9 @@
 .m-0 {
   margin: 0px;
 }
+.m-1 {
+  margin: 0.25rem;
+}
 .mx-1 {
   margin-left: 0.25rem;
   margin-right: 0.25rem;
@@ -135,6 +138,9 @@
 .flex {
   display: flex;
 }
+.hidden {
+  display: none;
+}
 .h-12 {
   height: 3rem;
 }
@@ -162,6 +168,12 @@
 .max-h-\[6em\] {
   max-height: 6em;
 }
+.max-h-full {
+  max-height: 100%;
+}
+.min-h-0 {
+  min-height: 0px;
+}
 .min-h-\[1rem\] {
   min-height: 1rem;
 }
@@ -188,6 +200,9 @@
 }
 .min-w-80 {
   min-width: 20rem;
+}
+.max-w-full {
+  max-width: 100%;
 }
 .max-w-md {
   max-width: 28rem;
@@ -228,6 +243,9 @@
 .\!justify-start {
   justify-content: flex-start !important;
 }
+.justify-start {
+  justify-content: flex-start;
+}
 .justify-end {
   justify-content: flex-end;
 }
@@ -255,6 +273,9 @@
   --tw-space-y-reverse: 0;
   margin-top: calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));
   margin-bottom: calc(0.5rem * var(--tw-space-y-reverse));
+}
+.overflow-hidden {
+  overflow: hidden;
 }
 .overflow-x-auto {
   overflow-x: auto;
@@ -334,6 +355,10 @@
 .bg-white {
   --tw-bg-opacity: 1;
   background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
+}
+.object-contain {
+  -o-object-fit: contain;
+     object-fit: contain;
 }
 .p-0 {
   padding: 0px;
