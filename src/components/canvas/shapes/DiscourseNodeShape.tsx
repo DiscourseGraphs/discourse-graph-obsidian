@@ -8,7 +8,7 @@ import {
   useEditor,
   useValue,
 } from "tldraw";
-import type { App, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
 import { memo, createElement, useEffect } from "react";
 import DiscourseGraphPlugin from "~/index";
 import {
@@ -21,6 +21,7 @@ import { getNodeTypeById } from "~/utils/typeUtils";
 import { calcDiscourseNodeSize } from "~/utils/calcDiscourseNodeSize";
 import { openFileInSidebar } from "~/components/canvas/utils/openFileUtils";
 import { showToast } from "~/components/canvas/utils/toastUtils";
+import ModifyNodeModal from "~/components/ModifyNodeModal";
 
 export type DiscourseNodeShape = TLBaseShape<
   "discourse-node",
@@ -75,6 +76,75 @@ export class DiscourseNodeUtil extends BaseBoxShapeUtil<DiscourseNodeShape> {
   ) {
     return resizeBox(shape, info);
   }
+
+  override onDoubleClick = (shape: DiscourseNodeShape) => {
+    void (async () => {
+      const file = await this.getFile(shape, {
+        app: this.options.app,
+        canvasFile: this.options.canvasFile,
+      });
+
+      if (!file) {
+        return;
+      }
+
+      const fileCache = this.options.app.metadataCache.getFileCache(file);
+      const nodeTypeId = fileCache?.frontmatter?.nodeTypeId as
+        | string
+        | undefined;
+
+      const nodeType = nodeTypeId
+        ? this.options.plugin.settings.nodeTypes.find(
+            (nt) => nt.id === nodeTypeId,
+          )
+        : undefined;
+
+      const modal = new ModifyNodeModal(this.options.app, {
+        nodeTypes: this.options.plugin.settings.nodeTypes,
+        plugin: this.options.plugin,
+        onSubmit: async ({ title: newTitle, initialFile: file }) => {
+          const editor = this.editor;
+          if (!editor || !file) return;
+
+          const formattedName = newTitle.trim();
+          if (formattedName) {
+            // Rename the file
+            const folderPath =
+              this.options.plugin.settings.nodesFolderPath.trim();
+            let newPath = "";
+            if (folderPath) {
+              const folderExists =
+                this.options.app.vault.getAbstractFileByPath(folderPath);
+              if (!folderExists) {
+                await this.options.app.vault.createFolder(folderPath);
+              }
+              newPath = `${folderPath}/${formattedName}.md`;
+            } else {
+              const dirPath = file.parent?.path ?? "";
+              newPath = dirPath
+                ? `${dirPath}/${formattedName}.md`
+                : `${formattedName}.md`;
+            }
+
+            await this.options.app.fileManager.renameFile(file, newPath);
+
+            editor.updateShape<DiscourseNodeShape>({
+              id: shape.id,
+              type: "discourse-node",
+              props: {
+                ...shape.props,
+                title: formattedName,
+              },
+            });
+          }
+        },
+        initialFile: file,
+        initialNodeType: nodeType,
+      });
+
+      modal.open();
+    })();
+  };
 
   component(shape: DiscourseNodeShape) {
     return (
@@ -308,7 +378,7 @@ const discourseNodeContent = memo(
         style={{
           backgroundColor: nodeType?.color ?? "",
         }}
-         // NOTE: These Tailwind classes (p-2, border-2, rounded-md, m-1, text-base, m-0, text-sm)
+        // NOTE: These Tailwind classes (p-2, border-2, rounded-md, m-1, text-base, m-0, text-sm)
         // correspond to constants in nodeConstants.ts. If you change these classes, update the
         // constants and the measureNodeText function to keep measurements accurate.
         className="relative box-border flex h-full w-full flex-col items-start justify-center rounded-md border-2 p-2"
@@ -348,8 +418,6 @@ const discourseNodeContent = memo(
             </svg>
           </button>
         )}
-        <h1 className="m-0 text-base">{title || "..."}</h1>
-        <p className="m-0 text-sm opacity-80">{nodeType?.name || ""}</p>
         {shape.props.imageSrc ? (
           <div className="mt-2 flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden">
             <img
@@ -361,6 +429,8 @@ const discourseNodeContent = memo(
             />
           </div>
         ) : null}
+        <h1 className="m-0 pt-4 text-base">{title || "..."}</h1>
+        <p className="m-0 text-sm opacity-80">{nodeType?.name || ""}</p>
       </div>
     );
   },
