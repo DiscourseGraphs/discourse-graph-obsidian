@@ -2,43 +2,135 @@ import { TFile, App } from "obsidian";
 import { BulkImportPattern, BulkImportCandidate, DiscourseNode } from "~/types";
 import { getDiscourseNodeFormatExpression } from "~/utils/getDiscourseNodeFormatExpression";
 import { extractContentFromTitle } from "~/utils/extractContentFromTitle";
-import { Datacore } from "@blacksmithgu/datacore";
 
+// Import datacore types and classes
 type DatacorePage = {
   $name: string;
   $path?: string;
 };
 
+type DatacoreSettings = {
+  importerNumThreads: number;
+  importerUtilization: number;
+  enableJs: boolean;
+  defaultPagingEnabled: boolean;
+  defaultPageSize: number;
+  scrollOnPageChange: boolean;
+  maxRecursiveRenderDepth: number;
+  defaultDateFormat: string;
+  defaultDateTimeFormat: string;
+  renderNullAs: string;
+  indexInlineFields: boolean;
+};
+
+// We'll dynamically import datacore at runtime to handle initialization properly
+let Datacore: any;
+let DatacoreApi: any;
+
+// Try to load datacore classes
+async function loadDatacore() {
+  if (Datacore && DatacoreApi) return true;
+  
+  try {
+    const dc = await import("@blacksmithgu/datacore");
+    Datacore = (dc as any).Datacore;
+    DatacoreApi = (dc as any).DatacoreApi;
+    return true;
+  } catch (error) {
+    console.error("Failed to load datacore package:", error);
+    return false;
+  }
+}
+
 export class QueryEngine {
   private app: App;
-  private dc: Datacore | undefined;
+  private datacoreInstance: any | undefined;
+  private api: any | undefined;
   private readonly MIN_QUERY_LENGTH = 2;
   private initializationPromise: Promise<void> | undefined;
+  private initializationAttempted = false;
 
   constructor(app: App) {
     this.app = app;
-    this.initializeDatacore();
+    // Don't initialize immediately - wait until first use
   }
 
   private async initializeDatacore() {
+    if (this.initializationAttempted) return;
+    this.initializationAttempted = true;
+
     try {
-      // Initialize datacore with the Obsidian app
-      this.dc = new Datacore(this.app);
-      
-      // Wait for datacore to be ready
-      if (this.dc && typeof this.dc.initialize === 'function') {
-        this.initializationPromise = this.dc.initialize();
-        await this.initializationPromise;
+      // Load datacore classes
+      const loaded = await loadDatacore();
+      if (!loaded) {
+        console.warn("Datacore package could not be loaded");
+        return;
       }
+
+      // Create default settings for datacore
+      const settings: DatacoreSettings = {
+        importerNumThreads: 4,
+        importerUtilization: 0.5,
+        enableJs: false,
+        defaultPagingEnabled: true,
+        defaultPageSize: 50,
+        scrollOnPageChange: false,
+        maxRecursiveRenderDepth: 4,
+        defaultDateFormat: "MMMM dd, yyyy",
+        defaultDateTimeFormat: "h:mm a - MMMM dd, yyyy",
+        renderNullAs: "-",
+        indexInlineFields: true,
+      };
+
+      // Initialize datacore with the Obsidian app
+      this.datacoreInstance = new Datacore(this.app, "0.1.24", settings);
       
-      console.log("Datacore initialized successfully");
+      // Create the API wrapper
+      this.api = new DatacoreApi(this.datacoreInstance);
+      
+      // Initialize the datacore index
+      this.initializationPromise = new Promise((resolve, reject) => {
+        try {
+          // Start initialization
+          this.datacoreInstance.initialize();
+          
+          // Wait for initialized event
+          this.datacoreInstance.on("initialized", () => {
+            console.log("Datacore initialized successfully");
+            resolve();
+          });
+          
+          // If already initialized, resolve immediately
+          if (this.datacoreInstance.initialized) {
+            resolve();
+          }
+          
+          // Add timeout to prevent hanging
+          setTimeout(() => {
+            if (!this.datacoreInstance.initialized) {
+              console.warn("Datacore initialization timeout - proceeding anyway");
+              resolve();
+            }
+          }, 10000);
+        } catch (error) {
+          console.error("Error during datacore initialization:", error);
+          reject(error);
+        }
+      });
+      
+      await this.initializationPromise;
     } catch (error) {
       console.error("Failed to initialize Datacore:", error);
-      this.dc = undefined;
+      this.api = undefined;
+      this.datacoreInstance = undefined;
     }
   }
 
   private async ensureInitialized(): Promise<boolean> {
+    if (!this.initializationAttempted) {
+      await this.initializeDatacore();
+    }
+    
     if (this.initializationPromise) {
       try {
         await this.initializationPromise;
@@ -47,7 +139,8 @@ export class QueryEngine {
         return false;
       }
     }
-    return this.dc !== undefined;
+    
+    return this.api !== undefined;
   }
 
   /**
@@ -62,7 +155,7 @@ export class QueryEngine {
     }
 
     const isReady = await this.ensureInitialized();
-    if (!isReady || !this.dc) {
+    if (!isReady || !this.api) {
       console.warn(
         "Datacore API not available. Search functionality is not available.",
       );
@@ -74,7 +167,7 @@ export class QueryEngine {
         ? `@page and exists(nodeTypeId) and nodeTypeId = "${nodeTypeId}"`
         : "@page and exists(nodeTypeId)";
       
-      const potentialNodes = await this.dc.query(dcQuery);
+      const potentialNodes = this.api.query(dcQuery);
 
       const searchResults = potentialNodes.filter((p: DatacorePage) =>
         this.fuzzySearch(p.$name, query),
@@ -113,7 +206,7 @@ export class QueryEngine {
     }
 
     const isReady = await this.ensureInitialized();
-    if (!isReady || !this.dc) {
+    if (!isReady || !this.api) {
       console.warn(
         "Datacore API not available. Search functionality is not available.",
       );
@@ -125,7 +218,7 @@ export class QueryEngine {
         .map((id) => `nodeTypeId = "${id}"`)
         .join(" or ")}`;
 
-      const potentialNodes = await this.dc.query(dcQuery);
+      const potentialNodes = this.api.query(dcQuery);
       const searchResults = potentialNodes.filter((p: DatacorePage) => {
         return this.fuzzySearch(p.$name, query);
       });
@@ -234,7 +327,7 @@ export class QueryEngine {
     const candidates: BulkImportCandidate[] = [];
 
     const isReady = await this.ensureInitialized();
-    if (!isReady || !this.dc) {
+    if (!isReady || !this.api) {
       console.warn(
         "Datacore API not available. Falling back to vault iteration.",
       );
@@ -254,7 +347,7 @@ export class QueryEngine {
         dcQuery = `@page and (!exists(nodeTypeId) or (${validIdConditions}))`;
       }
 
-      const potentialPages = await this.dc.query(dcQuery);
+      const potentialPages = this.api.query(dcQuery);
 
       for (const page of potentialPages) {
         const fileName = page.$name;

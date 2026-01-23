@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx scripts/dev.ts",
-    "build": "tsx scripts/build.ts",
+    "build": "tsx scripts/compile.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "publish": "tsx scripts/publish.ts --version 0.1.0",
