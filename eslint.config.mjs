@@ -1,12 +1,13 @@
-import { config } from "@repo/eslint-config/react-internal";
-
 export default [
-  ...config,
   {
+    ignores: ["dist/**", "node_modules/**", "main.js"],
+  },
+  {
+    files: ["**/*.ts", "**/*.tsx"],
     languageOptions: {
       parserOptions: {
-        tsconfigRootDir: ".",
-        project: true,
+        ecmaVersion: "latest",
+        sourceType: "module",
         ecmaFeatures: {
           jsx: true,
         },
