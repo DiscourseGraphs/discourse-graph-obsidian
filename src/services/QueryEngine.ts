@@ -2,18 +2,7 @@ import { TFile, App } from "obsidian";
 import { BulkImportPattern, BulkImportCandidate, DiscourseNode } from "~/types";
 import { getDiscourseNodeFormatExpression } from "~/utils/getDiscourseNodeFormatExpression";
 import { extractContentFromTitle } from "~/utils/extractContentFromTitle";
-
-// This is a workaround to get the datacore API.
-// TODO: Remove once we can use datacore npm package
-type AppWithPlugins = App & {
-  plugins: {
-    plugins: {
-      [key: string]: {
-        api: unknown;
-      };
-    };
-  };
-};
+import { Datacore } from "@blacksmithgu/datacore";
 
 type DatacorePage = {
   $name: string;
@@ -22,19 +11,43 @@ type DatacorePage = {
 
 export class QueryEngine {
   private app: App;
-  private dc:
-    | {
-        query: (query: string) => DatacorePage[];
-      }
-    | undefined;
+  private dc: Datacore | undefined;
   private readonly MIN_QUERY_LENGTH = 2;
+  private initializationPromise: Promise<void> | undefined;
 
   constructor(app: App) {
-    const appWithPlugins = app as AppWithPlugins;
-    this.dc = appWithPlugins.plugins?.plugins?.["datacore"]?.api as
-      | { query: (query: string) => DatacorePage[] }
-      | undefined;
     this.app = app;
+    this.initializeDatacore();
+  }
+
+  private async initializeDatacore() {
+    try {
+      // Initialize datacore with the Obsidian app
+      this.dc = new Datacore(this.app);
+      
+      // Wait for datacore to be ready
+      if (this.dc && typeof this.dc.initialize === 'function') {
+        this.initializationPromise = this.dc.initialize();
+        await this.initializationPromise;
+      }
+      
+      console.log("Datacore initialized successfully");
+    } catch (error) {
+      console.error("Failed to initialize Datacore:", error);
+      this.dc = undefined;
+    }
+  }
+
+  private async ensureInitialized(): Promise<boolean> {
+    if (this.initializationPromise) {
+      try {
+        await this.initializationPromise;
+      } catch (error) {
+        console.error("Datacore initialization failed:", error);
+        return false;
+      }
+    }
+    return this.dc !== undefined;
   }
 
   /**
@@ -47,7 +60,9 @@ export class QueryEngine {
     if (!query || query.length < this.MIN_QUERY_LENGTH) {
       return [];
     }
-    if (!this.dc) {
+
+    const isReady = await this.ensureInitialized();
+    if (!isReady || !this.dc) {
       console.warn(
         "Datacore API not available. Search functionality is not available.",
       );
@@ -58,6 +73,7 @@ export class QueryEngine {
       const dcQuery = nodeTypeId
         ? `@page and exists(nodeTypeId) and nodeTypeId = "${nodeTypeId}"`
         : "@page and exists(nodeTypeId)";
+      
       const potentialNodes = await this.dc.query(dcQuery);
 
       const searchResults = potentialNodes.filter((p: DatacorePage) =>
@@ -95,7 +111,9 @@ export class QueryEngine {
     if (!query || query.length < this.MIN_QUERY_LENGTH) {
       return [];
     }
-    if (!this.dc) {
+
+    const isReady = await this.ensureInitialized();
+    if (!isReady || !this.dc) {
       console.warn(
         "Datacore API not available. Search functionality is not available.",
       );
@@ -107,7 +125,7 @@ export class QueryEngine {
         .map((id) => `nodeTypeId = "${id}"`)
         .join(" or ")}`;
 
-      const potentialNodes = this.dc.query(dcQuery);
+      const potentialNodes = await this.dc.query(dcQuery);
       const searchResults = potentialNodes.filter((p: DatacorePage) => {
         return this.fuzzySearch(p.$name, query);
       });
@@ -215,7 +233,8 @@ export class QueryEngine {
   ): Promise<BulkImportCandidate[]> {
     const candidates: BulkImportCandidate[] = [];
 
-    if (!this.dc) {
+    const isReady = await this.ensureInitialized();
+    if (!isReady || !this.dc) {
       console.warn(
         "Datacore API not available. Falling back to vault iteration.",
       );
@@ -235,7 +254,7 @@ export class QueryEngine {
         dcQuery = `@page and (!exists(nodeTypeId) or (${validIdConditions}))`;
       }
 
-      const potentialPages = this.dc.query(dcQuery);
+      const potentialPages = await this.dc.query(dcQuery);
 
       for (const page of potentialPages) {
         const fileName = page.$name;
