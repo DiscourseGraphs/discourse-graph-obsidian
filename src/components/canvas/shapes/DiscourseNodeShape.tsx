@@ -443,19 +443,23 @@ const discourseNodeContent = memo(
           </div>
         ) : null}
         <h1
-          className="m-1"
+          className="m-1 overflow-hidden"
           style={{
             fontSize: `${fontSize}px`,
             fontFamily,
+            overflowWrap: "break-word",
+            wordBreak: "break-word",
           }}
         >
           {title || "..."}
         </h1>
         <p
-          className="m-0 opacity-80"
+          className="m-0 opacity-80 overflow-hidden"
           style={{
             fontSize: `${fontSize * 0.75}px`,
             fontFamily,
+            overflowWrap: "break-word",
+            wordBreak: "break-word",
           }}
         >
           {nodeType?.name || ""}
