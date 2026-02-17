@@ -6,6 +6,7 @@ import {
   TFile,
   MarkdownView,
   WorkspaceLeaf,
+  Notice,
 } from "obsidian";
 import { EditorView } from "@codemirror/view";
 import { SettingsTab } from "~/components/Settings";
@@ -22,16 +23,44 @@ import ModifyNodeModal from "~/components/ModifyNodeModal";
 import { TagNodeHandler } from "~/utils/tagNodeHandler";
 import { TldrawView } from "~/components/canvas/TldrawView";
 import { NodeTagSuggestPopover } from "~/components/NodeTagSuggestModal";
+import { initializeSupabaseSync } from "~/utils/syncDgNodesToSupabase";
+import { FileChangeListener } from "~/utils/fileChangeListener";
+import generateUid from "~/utils/generateUid";
+import { migrateFrontmatterRelationsToRelationsJson } from "~/utils/relationsStore";
 
 export default class DiscourseGraphPlugin extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
   private styleElement: HTMLStyleElement | null = null;
   private tagNodeHandler: TagNodeHandler | null = null;
+  private fileChangeListener: FileChangeListener | null = null;
   private currentViewActions: { leaf: WorkspaceLeaf; action: any }[] = [];
   private pendingCanvasSwitches = new Set<string>();
 
   async onload() {
     await this.loadSettings();
+
+    await migrateFrontmatterRelationsToRelationsJson(this).catch((error) => {
+      console.error("Failed to migrate frontmatter relations:", error);
+    });
+
+    if (this.settings.syncModeEnabled === true) {
+      void initializeSupabaseSync(this).catch((error) => {
+        console.error("Failed to initialize Supabase sync:", error);
+        new Notice(
+          `Failed to initialize Supabase sync: ${error instanceof Error ? error.message : String(error)}`,
+          5000,
+        );
+      });
+
+      try {
+        this.fileChangeListener = new FileChangeListener(this);
+        this.fileChangeListener.initialize();
+      } catch (error) {
+        console.error("Failed to initialize FileChangeListener:", error);
+        this.fileChangeListener = null;
+      }
+    }
+
     registerCommands(this);
     this.addSettingTab(new SettingsTab(this.app, this));
 
@@ -96,7 +125,7 @@ export default class DiscourseGraphPlugin extends Plugin {
       (leaf) => new DiscourseContextView(leaf, this),
     );
 
-    this.addRibbonIcon("telescope", "Toggle Discourse Context", () => {
+    this.addRibbonIcon("telescope", "Toggle discourse context", () => {
       this.toggleDiscourseContextView();
     });
 
@@ -168,7 +197,7 @@ export default class DiscourseGraphPlugin extends Plugin {
         if (!editor.getSelection()) return;
 
         menu.addItem((menuItem) => {
-          menuItem.setTitle("Turn into Discourse Node");
+          menuItem.setTitle("Turn into discourse node");
           menuItem.setIcon("file-type");
 
           // Create submenu using the unofficial API pattern
@@ -240,10 +269,19 @@ export default class DiscourseGraphPlugin extends Plugin {
     try {
       this.createStyleElement();
 
-      let keysToHide: string[] = [];
+      const keysToHide: string[] = [];
 
       if (!this.settings.showIdsInFrontmatter) {
-        keysToHide.push("nodeTypeId");
+        keysToHide.push(
+          ...[
+            "nodeTypeId",
+            "importedFromSpaceUri",
+            "nodeInstanceId",
+            "publishedToGroups",
+            "lastModified",
+            "importedAssets",
+          ],
+        );
         keysToHide.push(...this.settings.relationTypes.map((rt) => rt.id));
       }
 
@@ -295,8 +333,9 @@ export default class DiscourseGraphPlugin extends Plugin {
   async loadSettings() {
     const loadedData = await this.loadData();
     this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData);
+    const changed = this.migrateSettings();
 
-    if (!loadedData || this.hasNewFields(loadedData)) {
+    if (changed || !loadedData || this.hasNewFields(loadedData)) {
       await this.saveSettings();
     } else {
       this.updateFrontmatterStyles();
@@ -310,6 +349,33 @@ export default class DiscourseGraphPlugin extends Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     this.updateFrontmatterStyles();
+  }
+
+  private migrateSettings(): boolean {
+    let changed = false;
+    const now = new Date().getTime();
+    for (const typeObject of [
+      ...this.settings.nodeTypes,
+      ...this.settings.relationTypes,
+      ...this.settings.discourseRelations,
+    ]) {
+      if (!typeObject.created) {
+        typeObject.created = now;
+        changed = true;
+      }
+      if (!typeObject.modified) {
+        typeObject.modified = now;
+        changed = true;
+      }
+    }
+    // nodeTypes and relationTypes already have Ids
+    for (const typeObject of this.settings.discourseRelations) {
+      if (!typeObject.id) {
+        typeObject.id = generateUid("rel3");
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   private cleanupViewActions() {
@@ -338,6 +404,11 @@ export default class DiscourseGraphPlugin extends Plugin {
     if (this.tagNodeHandler) {
       this.tagNodeHandler.cleanup();
       this.tagNodeHandler = null;
+    }
+
+    if (this.fileChangeListener) {
+      this.fileChangeListener.cleanup();
+      this.fileChangeListener = null;
     }
 
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_DISCOURSE_CONTEXT);

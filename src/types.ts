@@ -1,4 +1,5 @@
 import { TFile } from "obsidian";
+import { TldrawColorName } from "./utils/tldrawColors";
 
 export type DiscourseNode = {
   id: string;
@@ -10,19 +11,26 @@ export type DiscourseNode = {
   color?: string;
   tag?: string;
   keyImage?: boolean;
+  created: number;
+  modified: number;
 };
 
 export type DiscourseRelationType = {
   id: string;
   label: string;
   complement: string;
-  color: string;
+  color: TldrawColorName;
+  created: number;
+  modified: number;
 };
 
 export type DiscourseRelation = {
+  id: string;
   sourceId: string;
   destinationId: string;
   relationshipTypeId: string;
+  created: number;
+  modified: number;
 };
 
 export type Settings = {
@@ -34,6 +42,9 @@ export type Settings = {
   canvasFolderPath: string;
   canvasAttachmentsFolderPath: string;
   nodeTagHotkey: string;
+  spacePassword?: string;
+  accountLocalId?: string;
+  syncModeEnabled?: boolean;
 };
 
 export type BulkImportCandidate = {
@@ -48,6 +59,25 @@ export type BulkImportPattern = {
   nodeTypeId: string;
   alternativePattern: string;
   enabled: boolean;
+};
+
+export type ImportableNode = {
+  nodeInstanceId: string;
+  title: string;
+  spaceId: number;
+  spaceName: string;
+  groupId: string;
+  selected: boolean;
+  /** From source Content (latest last_modified across variants). Set when loaded from getPublishedNodesForGroups. */
+  createdAt?: number;
+  modifiedAt?: number;
+  filePath?: string;
+};
+
+export type GroupWithNodes = {
+  groupId: string;
+  groupName?: string;
+  nodes: ImportableNode[];
 };
 
 export const VIEW_TYPE_DISCOURSE_CONTEXT = "discourse-context-view";

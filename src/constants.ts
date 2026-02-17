@@ -2,26 +2,43 @@ import { TLDefaultSizeStyle } from "tldraw";
 import { DiscourseNode, DiscourseRelationType, Settings } from "~/types";
 import generateUid from "~/utils/generateUid";
 
+const now = new Date().getTime();
+
 export const DEFAULT_NODE_TYPES: Record<string, DiscourseNode> = {
-  Question: {
+  question: {
     id: generateUid("node"),
     name: "Question",
     format: "QUE - {content}",
     color: "#99890e",
+    created: now,
+    modified: now,
   },
-  Claim: {
+  claim: {
     id: generateUid("node"),
     name: "Claim",
     format: "CLM - {content}",
     color: "#7DA13E",
     tag: "clm-candidate",
+    created: now,
+    modified: now,
   },
-  Evidence: {
+  evidence: {
     id: generateUid("node"),
     name: "Evidence",
     format: "EVD - {content}",
     color: "#DB134A",
     tag: "evd-candidate",
+    created: now,
+    modified: now,
+  },
+  source: {
+    id: generateUid("node"),
+    name: "Source",
+    format: "SRC - {content}",
+    color: "#3B82F6",
+    tag: "src-candidate",
+    created: now,
+    modified: now,
   },
 };
 export const DEFAULT_RELATION_TYPES: Record<string, DiscourseRelationType> = {
@@ -29,19 +46,33 @@ export const DEFAULT_RELATION_TYPES: Record<string, DiscourseRelationType> = {
     id: generateUid("relation"),
     label: "supports",
     complement: "is supported by",
-    color: "#099268",
+    color: "green",
+    created: now,
+    modified: now,
   },
   opposes: {
     id: generateUid("relation"),
     label: "opposes",
     complement: "is opposed by",
-    color: "#e03131",
+    color: "red",
+    created: now,
+    modified: now,
   },
   informs: {
     id: generateUid("relation"),
     label: "informs",
     complement: "is informed by",
-    color: "#adb5bd",
+    color: "grey",
+    created: now,
+    modified: now,
+  },
+  derivedFrom: {
+    id: generateUid("relation"),
+    label: "derived from",
+    complement: "has derivation",
+    color: "blue",
+    created: now,
+    modified: now,
   },
 };
 
@@ -50,19 +81,36 @@ export const DEFAULT_SETTINGS: Settings = {
   relationTypes: Object.values(DEFAULT_RELATION_TYPES),
   discourseRelations: [
     {
-      sourceId: DEFAULT_NODE_TYPES.Evidence!.id,
-      destinationId: DEFAULT_NODE_TYPES.Question!.id,
+      id: generateUid("rel3"),
+      sourceId: DEFAULT_NODE_TYPES.evidence!.id,
+      destinationId: DEFAULT_NODE_TYPES.question!.id,
       relationshipTypeId: DEFAULT_RELATION_TYPES.informs!.id,
+      created: now,
+      modified: now,
     },
     {
-      sourceId: DEFAULT_NODE_TYPES.Evidence!.id,
-      destinationId: DEFAULT_NODE_TYPES.Claim!.id,
+      id: generateUid("rel3"),
+      sourceId: DEFAULT_NODE_TYPES.evidence!.id,
+      destinationId: DEFAULT_NODE_TYPES.claim!.id,
       relationshipTypeId: DEFAULT_RELATION_TYPES.supports!.id,
+      created: now,
+      modified: now,
     },
     {
-      sourceId: DEFAULT_NODE_TYPES.Evidence!.id,
-      destinationId: DEFAULT_NODE_TYPES.Claim!.id,
+      id: generateUid("rel3"),
+      sourceId: DEFAULT_NODE_TYPES.evidence!.id,
+      destinationId: DEFAULT_NODE_TYPES.claim!.id,
       relationshipTypeId: DEFAULT_RELATION_TYPES.opposes!.id,
+      created: now,
+      modified: now,
+    },
+    {
+      id: generateUid("rel3"),
+      sourceId: DEFAULT_NODE_TYPES.evidence!.id,
+      destinationId: DEFAULT_NODE_TYPES.source!.id,
+      relationshipTypeId: DEFAULT_RELATION_TYPES.derivedFrom!.id,
+      created: now,
+      modified: now,
     },
   ],
   showIdsInFrontmatter: false,
@@ -70,7 +118,17 @@ export const DEFAULT_SETTINGS: Settings = {
   canvasFolderPath: "Discourse Canvas",
   canvasAttachmentsFolderPath: "attachments",
   nodeTagHotkey: "\\",
+  spacePassword: undefined,
+  accountLocalId: undefined,
+  syncModeEnabled: false,
 };
+
+export const FEATURE_FLAGS = {
+  // settings for these features are in the Admin Panel (hidden tab in Settings, toggle with Ctrl+Shift+A)
+  DATABASE_SYNC: "databaseSync",
+} as const;
+
+export type FeatureFlagKey = (typeof FEATURE_FLAGS)[keyof typeof FEATURE_FLAGS];
 export const FRONTMATTER_KEY = "tldr-dg";
 export const TLDATA_DELIMITER_START =
   "!!!_START_OF_TLDRAW_DG_DATA__DO_NOT_CHANGE_THIS_PHRASE_!!!";

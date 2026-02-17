@@ -44,7 +44,6 @@ import {
 } from "~/components/canvas/shapes/DiscourseRelationBinding";
 import ToastListener from "./ToastListener";
 import { RelationsOverlay } from "./overlays/RelationOverlay";
-import { showToast } from "./utils/toastUtils";
 import { WHITE_LOGO_SVG } from "~/icons";
 import { CustomContextMenu } from "./CustomContextMenu";
 import {
@@ -53,7 +52,6 @@ import {
   openFileInNewLeaf,
   resolveDiscourseNodeFile,
 } from "./utils/openFileUtils";
-
 type TldrawPreviewProps = {
   store: TLStore;
   file: TFile;
@@ -384,7 +382,7 @@ export const TldrawPreviewComponent = ({
               tools: (editor, tools) => {
                 tools["discourse-node"] = {
                   id: "discourse-node",
-                  label: "Discourse Node",
+                  label: "Discourse node",
                   readonlyOk: false,
                   icon: "discourseNodeIcon",
                   onSelect: () => {
@@ -393,7 +391,7 @@ export const TldrawPreviewComponent = ({
                 };
                 tools["discourse-relation"] = {
                   id: "discourse-relation",
-                  label: "Discourse Relation",
+                  label: "Discourse relation",
                   readonlyOk: false,
                   icon: "tool-arrow",
                   onSelect: () => {

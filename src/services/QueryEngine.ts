@@ -38,7 +38,7 @@ export class QueryEngine {
   }
 
   /**
-   * Search across all Discourse Nodes (files that have frontmatter nodeTypeId)
+   * Search across all discourse nodes (files that have frontmatter nodeTypeId)
    */
   searchDiscourseNodesByTitle = async (
     query: string,
@@ -289,6 +289,53 @@ export class QueryEngine {
       return this.fallbackScanVault(patterns, validNodeTypes);
     }
   }
+
+  /**
+   * Find an existing imported file by nodeInstanceId and importedFromSpaceUri
+   * Uses DataCore when available; falls back to vault iteration otherwise
+   * Returns the file if found, null otherwise
+   */
+  findExistingImportedFile = (
+    nodeInstanceId: string,
+    importedFromSpaceUri: string,
+  ): TFile | null => {
+    if (this.dc) {
+      try {
+        const safeId = nodeInstanceId
+          .replace(/\\/g, "\\\\")
+          .replace(/"/g, '\\"');
+        const safeUri = importedFromSpaceUri
+          .replace(/\\/g, "\\\\")
+          .replace(/"/g, '\\"');
+        const dcQuery = `@page and nodeInstanceId = "${safeId}" and importedFromSpaceUri = "${safeUri}"`;
+        const results = this.dc.query(dcQuery);
+
+        for (const page of results) {
+          if (page.$path) {
+            const file = this.app.vault.getAbstractFileByPath(page.$path);
+            if (file && file instanceof TFile) {
+              return file;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("Error querying DataCore for imported file:", error);
+      }
+    }
+
+    // Fallback: DataCore absent, query failed, or indexed field mismatch
+    const allFiles = this.app.vault.getMarkdownFiles();
+    for (const f of allFiles) {
+      const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
+      if (
+        fm?.nodeInstanceId === nodeInstanceId &&
+        fm.importedFromSpaceUri === importedFromSpaceUri
+      ) {
+        return f;
+      }
+    }
+    return null;
+  };
 
   private async fallbackScanVault(
     patterns: BulkImportPattern[],

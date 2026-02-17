@@ -1,16 +1,66 @@
-import { Editor } from "obsidian";
+import { Editor, MarkdownView, Notice, TFile } from "obsidian";
 import type DiscourseGraphPlugin from "~/index";
 import { NodeTypeModal } from "~/components/NodeTypeModal";
 import ModifyNodeModal from "~/components/ModifyNodeModal";
 import { BulkIdentifyDiscourseNodesModal } from "~/components/BulkIdentifyDiscourseNodesModal";
+import { ImportNodesModal } from "~/components/ImportNodesModal";
 import { createDiscourseNode } from "./createNode";
+import { refreshAllImportedFiles } from "./importNodes";
 import { VIEW_TYPE_MARKDOWN, VIEW_TYPE_TLDRAW_DG_PREVIEW } from "~/constants";
 import { createCanvas } from "~/components/canvas/utils/tldraw";
+import { createOrUpdateDiscourseEmbedding } from "./syncDgNodesToSupabase";
+import { publishNode } from "./publishNode";
+import { addRelationIfRequested } from "~/components/canvas/utils/relationJsonUtils";
+import type { DiscourseNode } from "~/types";
+
+
+type ModifyNodeSubmitParams = {
+  nodeType: DiscourseNode;
+  title: string;
+  initialFile?: TFile;
+  selectedExistingNode?: TFile;
+  relationshipId?: string;
+  relationshipTargetFile?: TFile;
+};
+
+const createModifyNodeModalSubmitHandler = (
+  plugin: DiscourseGraphPlugin,
+  editor: Editor,
+): ((params: ModifyNodeSubmitParams) => Promise<void>) => {
+  return async ({
+    nodeType,
+    title,
+    selectedExistingNode,
+    relationshipId,
+    relationshipTargetFile,
+  }: ModifyNodeSubmitParams) => {
+    if (selectedExistingNode) {
+      editor.replaceSelection(`[[${selectedExistingNode.basename}]]`);
+      await addRelationIfRequested(plugin, selectedExistingNode, {
+        relationshipId,
+        relationshipTargetFile,
+      });
+    } else {
+      const newFile = await createDiscourseNode({
+        plugin,
+        nodeType,
+        text: title,
+        editor,
+      });
+      if (newFile) {
+        await addRelationIfRequested(plugin, newFile, {
+          relationshipId,
+          relationshipTargetFile,
+        });
+      }
+    }
+  };
+};
 
 export const registerCommands = (plugin: DiscourseGraphPlugin) => {
   plugin.addCommand({
     id: "open-node-type-menu",
-    name: "Open Node Type Menu",
+    name: "Open node type menu",
     hotkeys: [{ modifiers: ["Mod"], key: "\\" }],
     editorCallback: (editor: Editor) => {
       const hasSelection = !!editor.getSelection();
@@ -18,21 +68,14 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
       if (hasSelection) {
         new NodeTypeModal(editor, plugin.settings.nodeTypes, plugin).open();
       } else {
+        const currentFile =
+          plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file ||
+          undefined;
         new ModifyNodeModal(plugin.app, {
           nodeTypes: plugin.settings.nodeTypes,
           plugin,
-          onSubmit: async ({ nodeType, title, selectedExistingNode }) => {
-            if (selectedExistingNode) {
-              editor.replaceSelection(`[[${selectedExistingNode.basename}]]`);
-            } else {
-              await createDiscourseNode({
-                plugin,
-                nodeType,
-                text: title,
-                editor,
-              });
-            }
-          },
+          currentFile,
+          onSubmit: createModifyNodeModalSubmitHandler(plugin, editor),
         }).open();
       }
     },
@@ -40,38 +83,89 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
 
   plugin.addCommand({
     id: "create-discourse-node",
-    name: "Create Discourse Node",
+    name: "Create discourse node",
     editorCallback: (editor: Editor) => {
+      const currentFile =
+        plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file ||
+        undefined;
       new ModifyNodeModal(plugin.app, {
         nodeTypes: plugin.settings.nodeTypes,
         plugin,
-        onSubmit: async ({ nodeType, title, selectedExistingNode }) => {
-          if (selectedExistingNode) {
-            editor.replaceSelection(`[[${selectedExistingNode.basename}]]`);
-          } else {
-            await createDiscourseNode({
-              plugin,
-            nodeType,
-            text: title,
-            editor,
-          });
-          }
-        },
+        currentFile,
+        onSubmit: createModifyNodeModalSubmitHandler(plugin, editor),
       }).open();
     },
   });
 
   plugin.addCommand({
     id: "bulk-identify-discourse-nodes",
-    name: "Bulk Identify Discourse Nodes",
+    name: "Bulk identify discourse nodes",
     callback: () => {
       new BulkIdentifyDiscourseNodesModal(plugin.app, plugin).open();
     },
   });
 
   plugin.addCommand({
+    id: "import-nodes-from-another-space",
+    name: "Import nodes from another space",
+    checkCallback: (checking: boolean) => {
+      if (!plugin.settings.syncModeEnabled) {
+        if (!checking) {
+          new Notice("Sync mode is not enabled", 3000);
+        }
+        return false;
+      }
+      if (!checking) {
+        new ImportNodesModal(plugin.app, plugin).open();
+      }
+      return true;
+    },
+  });
+
+  plugin.addCommand({
+    id: "refresh-imported-nodes",
+    name: "Fetch latest content from imported nodes",
+    checkCallback: (checking: boolean) => {
+      if (!plugin.settings.syncModeEnabled) {
+        if (!checking) {
+          new Notice("Sync mode is not enabled", 3000);
+        }
+        return false;
+      }
+      if (!checking) {
+        void refreshAllImportedFiles(plugin)
+          .then((result) => {
+            if (result.failed > 0) {
+              new Notice(
+                `Refresh completed with some issues:\n${result.success} file(s) refreshed successfully\n${result.failed} file(s) failed`,
+                5000,
+              );
+              if (result.errors.length > 0) {
+                console.error("Refresh errors:", result.errors);
+              }
+            } else if (result.success > 0) {
+              new Notice(
+                `Successfully refreshed ${result.success} imported node(s)`,
+                3000,
+              );
+            } else {
+              new Notice("No imported files found to refresh", 3000);
+            }
+          })
+          .catch((error) => {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            new Notice(`Refresh failed: ${errorMessage}`, 5000);
+            console.error("Refresh failed:", error);
+          });
+      }
+      return true;
+    },
+  });
+
+  plugin.addCommand({
     id: "toggle-discourse-context",
-    name: "Toggle Discourse Context",
+    name: "Toggle discourse context",
     callback: () => {
       plugin.toggleDiscourseContextView();
     },
@@ -79,7 +173,7 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
 
   plugin.addCommand({
     id: "open-discourse-graph-settings",
-    name: "Open Discourse Graph Settings",
+    name: "Open Discourse Graphs settings",
     callback: () => {
       // plugin.app.setting is an unofficial API
       /* eslint-disable @typescript-eslint/no-unsafe-call */
@@ -92,7 +186,7 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
 
   plugin.addCommand({
     id: "switch-to-tldraw-edit",
-    name: "Switch to Discourse Markdown Edit",
+    name: "Switch to discourse markdown edit",
     checkCallback: (checking: boolean) => {
       const leaf = plugin.app.workspace.activeLeaf;
       if (!leaf) return false;
@@ -109,7 +203,7 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
 
   plugin.addCommand({
     id: "switch-to-tldraw-preview",
-    name: "Switch to Discourse Graph Canvas View",
+    name: "Switch to Discourse Graph canvas view",
     checkCallback: (checking: boolean) => {
       const leaf = plugin.app.workspace.activeLeaf;
       if (!leaf) return false;
@@ -129,5 +223,68 @@ export const registerCommands = (plugin: DiscourseGraphPlugin) => {
     name: "Create new Discourse Graph canvas",
     icon: "layout-dashboard", // Using Lucide icon as per style guide
     callback: () => createCanvas(plugin),
+  });
+
+  plugin.addCommand({
+    id: "sync-discourse-nodes-to-supabase",
+    name: "Sync discourse nodes to Supabase",
+    checkCallback: (checking: boolean) => {
+      if (!plugin.settings.syncModeEnabled) {
+        new Notice("Sync mode is not enabled", 3000);
+        return false;
+      }
+      if (!checking) {
+        void createOrUpdateDiscourseEmbedding(plugin)
+          .then(() => {
+            new Notice("Discourse nodes synced successfully", 3000);
+          })
+          .catch((error) => {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            new Notice(`Sync failed: ${errorMessage}`, 5000);
+            console.error("Manual sync failed:", error);
+          });
+      }
+      return true;
+    },
+  });
+  plugin.addCommand({
+    id: "publish-discourse-node",
+    name: "Publish current node to lab space",
+    checkCallback: (checking: boolean) => {
+      if (!plugin.settings.syncModeEnabled) {
+        new Notice("Sync mode is not enabled", 3000);
+        return false;
+      }
+      const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!activeView || !activeView.file) {
+        return false;
+      }
+      const file = activeView.file;
+      const cache = plugin.app.metadataCache.getFileCache(file);
+      const frontmatter = cache?.frontmatter || {};
+      if (!frontmatter.nodeTypeId) {
+        return false;
+      }
+      if (!checking) {
+        if (!frontmatter.nodeInstanceId) {
+          new Notice("Please sync the node first");
+          return true;
+        }
+        // TODO (in follow-up PRs):
+        // Maybe sync the node now if unsynced
+        // Ensure that the node schema is synced to the database, and shared
+        // sync the assets to the database
+        publishNode({ plugin, file, frontmatter })
+          .then(() => {
+            new Notice("Published");
+          })
+          .catch((error: Error) => {
+            new Notice(error.message);
+            console.error(error);
+          });
+      }
+      return true;
+    },
   });
 };

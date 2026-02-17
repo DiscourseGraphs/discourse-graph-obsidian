@@ -13,6 +13,7 @@ import {
   TLDefaultFontStyle,
   FONT_SIZES,
   FONT_FAMILIES,
+  toDomPrecision,
 } from "tldraw";
 import { App, TFile } from "obsidian";
 import { memo, createElement, useEffect } from "react";
@@ -172,7 +173,13 @@ export class DiscourseNodeUtil extends BaseBoxShapeUtil<DiscourseNodeShape> {
   }
 
   indicator(shape: DiscourseNodeShape) {
-    return <rect width={shape.props.w} height={shape.props.h} />;
+    const { bounds } = this.editor.getShapeGeometry(shape);
+    return (
+      <rect
+        width={toDomPrecision(bounds.width)}
+        height={toDomPrecision(bounds.height)}
+      />
+    );
   }
 
   getFile = async (
@@ -393,7 +400,7 @@ const discourseNodeContent = memo(
         // NOTE: These Tailwind classes (p-2, border-2, rounded-md, m-1, text-base, m-0, text-sm)
         // correspond to constants in nodeConstants.ts. If you change these classes, update the
         // constants and the measureNodeText function to keep measurements accurate.
-        className="relative box-border flex h-full w-full flex-col items-start justify-center rounded-md border-2 p-2"
+        className="relative box-border flex h-full w-full flex-col items-start justify-center overflow-hidden rounded-md border-2 p-2"
       >
         {isHovered && (
           <button
@@ -451,15 +458,6 @@ const discourseNodeContent = memo(
         >
           {title || "..."}
         </h1>
-        <p
-          className="m-0 opacity-80"
-          style={{
-            fontSize: `${fontSize * 0.75}px`,
-            fontFamily,
-          }}
-        >
-          {nodeType?.name || ""}
-        </p>
       </div>
     );
   },
