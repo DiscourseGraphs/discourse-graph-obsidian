@@ -15,8 +15,16 @@ import {
   orderConceptsByDependency,
   discourseNodeInstanceToLocalConcept,
   discourseNodeSchemaToLocalConcept,
+  discourseRelationTripleSchemaToLocalConcept,
+  discourseRelationTypeToLocalConcept,
+  relationInstanceToLocalConcept,
 } from "./conceptConversion";
+import { loadRelations } from "~/utils/relationsStore";
 import type { LocalConceptDataInput } from "@repo/database/inputTypes";
+import {
+  type DiscourseNodeInVault,
+  collectDiscourseNodesFromVault,
+} from "./getDiscourseNodes";
 
 const DEFAULT_TIME = "1970-01-01";
 export type ChangeType = "title" | "content";
@@ -162,7 +170,7 @@ const getLastContentSyncTime = async (
   return new Date((data?.last_modified || DEFAULT_TIME) + "Z");
 };
 
-const getLastSchemaSyncTime = async (
+const getLastNodeSchemaSyncTime = async (
   supabaseClient: DGSupabaseClient,
   spaceId: number,
 ): Promise<Date> => {
@@ -171,17 +179,43 @@ const getLastSchemaSyncTime = async (
     .select("last_modified")
     .eq("space_id", spaceId)
     .eq("is_schema", true)
+    .eq("arity", 0)
     .order("last_modified", { ascending: false })
     .limit(1)
     .maybeSingle();
   return new Date((data?.last_modified || DEFAULT_TIME) + "Z");
 };
 
-type DiscourseNodeInVault = {
-  file: TFile;
-  frontmatter: Record<string, unknown>;
-  nodeTypeId: string;
-  nodeInstanceId: string;
+const getLastRelationSchemaSyncTime = async (
+  supabaseClient: DGSupabaseClient,
+  spaceId: number,
+): Promise<Date> => {
+  const { data } = await supabaseClient
+    .from("Concept")
+    .select("last_modified")
+    .eq("space_id", spaceId)
+    .eq("is_schema", true)
+    .gt("arity", 0)
+    .order("last_modified", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return new Date((data?.last_modified || DEFAULT_TIME) + "Z");
+};
+
+const getLastRelationSyncTime = async (
+  supabaseClient: DGSupabaseClient,
+  spaceId: number,
+): Promise<Date> => {
+  const { data } = await supabaseClient
+    .from("Concept")
+    .select("last_modified")
+    .eq("space_id", spaceId)
+    .eq("is_schema", false)
+    .gt("arity", 0)
+    .order("last_modified", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return new Date((data?.last_modified || DEFAULT_TIME) + "Z");
 };
 
 type BuildChangedNodesOptions = {
@@ -197,51 +231,6 @@ const mergeChangeTypes = (
 ): ChangeType[] => {
   const merged = new Set<ChangeType>([...base, ...additional]);
   return Array.from(merged);
-};
-
-/**
- * Step 1: Collect all discourse nodes from the vault
- * Filters markdown files that have nodeTypeId in frontmatter
- */
-const collectDiscourseNodesFromVault = async (
-  plugin: DiscourseGraphPlugin,
-): Promise<DiscourseNodeInVault[]> => {
-  const allFiles = plugin.app.vault.getMarkdownFiles();
-  const dgNodes: DiscourseNodeInVault[] = [];
-
-  for (const file of allFiles) {
-    const cache = plugin.app.metadataCache.getFileCache(file);
-    const frontmatter = cache?.frontmatter;
-
-    // Not a discourse node
-    if (!frontmatter?.nodeTypeId) {
-      continue;
-    }
-
-    if (frontmatter.importedFromSpaceUri) {
-      continue;
-    }
-
-    const nodeTypeId = frontmatter.nodeTypeId as string;
-    if (!nodeTypeId) {
-      continue;
-    }
-
-    const nodeInstanceId = await ensureNodeInstanceId(
-      plugin,
-      file,
-      frontmatter as Record<string, unknown>,
-    );
-
-    dgNodes.push({
-      file,
-      frontmatter: frontmatter as Record<string, unknown>,
-      nodeTypeId,
-      nodeInstanceId,
-    });
-  }
-
-  return dgNodes;
 };
 
 const getOrphanedNodeInstanceIds = async ({
@@ -515,32 +504,109 @@ const convertDgToSupabaseConcepts = async ({
   accountLocalId: string;
   plugin: DiscourseGraphPlugin;
 }): Promise<void> => {
-  const lastSchemaSync = (
-    await getLastSchemaSyncTime(supabaseClient, context.spaceId)
+  const lastNodeSchemaSync = (
+    await getLastNodeSchemaSyncTime(supabaseClient, context.spaceId)
   ).getTime();
-  const newNodeTypes = (plugin.settings.nodeTypes ?? []).filter(
-    (n) => n.modified > lastSchemaSync,
+  const lastRelationSchemaSync = (
+    await getLastRelationSchemaSyncTime(supabaseClient, context.spaceId)
+  ).getTime();
+  const lastRelationsSync = (
+    await getLastRelationSyncTime(supabaseClient, context.spaceId)
+  ).getTime();
+  const nodeTypes = plugin.settings.nodeTypes ?? [];
+  const relationTypes = plugin.settings.relationTypes ?? [];
+  const discourseRelations = plugin.settings.discourseRelations ?? [];
+  const allNodes = await collectDiscourseNodesFromVault(plugin);
+  const allNodesById = Object.fromEntries(
+    allNodes.map((n) => [n.nodeInstanceId, n]),
   );
 
-  const nodesTypesToLocalConcepts = newNodeTypes.map((nodeType) =>
-    discourseNodeSchemaToLocalConcept({
-      context,
-      node: nodeType,
-      accountLocalId,
-    }),
+  const nodeTypesById = Object.fromEntries(
+    nodeTypes.map((nodeType) => [nodeType.id, nodeType]),
   );
 
-  const nodeInstanceToLocalConcepts = nodesSince.map((node) =>
-    discourseNodeInstanceToLocalConcept({
+  const nodesTypesToLocalConcepts = nodeTypes
+    .filter((nodeType) => nodeType.modified > lastNodeSchemaSync)
+    .map((nodeType) =>
+      discourseNodeSchemaToLocalConcept({
+        context,
+        node: nodeType,
+        accountLocalId,
+      }),
+    );
+
+  const relationTypesById = Object.fromEntries(
+    relationTypes.map((relationType) => [relationType.id, relationType]),
+  );
+
+  const relationTypesToLocalConcepts = relationTypes
+    .filter((relationType) => relationType.modified > lastRelationSchemaSync)
+    .map((relationType) =>
+      discourseRelationTypeToLocalConcept({
+        context,
+        relationType,
+        accountLocalId,
+      }),
+    );
+
+  const discourseRelationTriplesToLocalConcepts = discourseRelations
+    .filter(
+      (relationTriple) =>
+        relationTriple.modified > lastRelationSchemaSync ||
+        // resync if type was changed, to update labels in triple
+        (relationTypesById[relationTriple.relationshipTypeId]?.modified ?? 0) >
+          lastRelationSchemaSync ||
+        // resync if source or destination node type was changed, to update names in triple
+        (nodeTypesById[relationTriple.sourceId]?.modified ?? 0) >
+          lastNodeSchemaSync ||
+        (nodeTypesById[relationTriple.destinationId]?.modified ?? 0) >
+          lastNodeSchemaSync,
+    )
+    .map((relation) =>
+      discourseRelationTripleSchemaToLocalConcept({
+        context,
+        relation,
+        accountLocalId,
+        nodeTypesById,
+        relationTypesById,
+      }),
+    )
+    .filter((n) => !!n);
+
+  const nodeInstanceToLocalConcepts = nodesSince.map((node) => {
+    return discourseNodeInstanceToLocalConcept({
       context,
       nodeData: node,
       accountLocalId,
-    }),
-  );
+    });
+  });
+
+  const relationInstancesData = await loadRelations(plugin);
+  const relationInstanceToLocalConcepts = Object.values(
+    relationInstancesData.relations,
+  )
+    .filter(
+      (relationInstanceData) =>
+        !relationInstanceData.importedFromRid &&
+        (relationInstanceData.lastModified || relationInstanceData.created) >
+          lastRelationsSync,
+    )
+    .map((relationInstanceData) =>
+      relationInstanceToLocalConcept({
+        context,
+        relationTypesById,
+        allNodesById,
+        relationInstanceData,
+      }),
+    )
+    .filter((n) => !!n);
 
   const conceptsToUpsert: LocalConceptDataInput[] = [
     ...nodesTypesToLocalConcepts,
+    ...relationTypesToLocalConcepts,
+    ...discourseRelationTriplesToLocalConcepts,
     ...nodeInstanceToLocalConcepts,
+    ...relationInstanceToLocalConcepts,
   ];
 
   if (conceptsToUpsert.length > 0) {
@@ -668,7 +734,7 @@ const collectDiscourseNodesFromPaths = async (
       continue;
     }
 
-    if (frontmatter.importedFromSpaceUri) {
+    if (frontmatter.importedFromRid) {
       console.debug(`Skipping imported file: ${filePath}`);
       continue;
     }

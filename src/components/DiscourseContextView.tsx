@@ -1,4 +1,10 @@
-import { ItemView, TFile, WorkspaceLeaf, Notice } from "obsidian";
+import {
+  ItemView,
+  TFile,
+  WorkspaceLeaf,
+  Notice,
+  FrontMatterCache,
+} from "obsidian";
 import { createRoot, Root } from "react-dom/client";
 import DiscourseGraphPlugin from "~/index";
 import { getDiscourseNodeFormatExpression } from "~/utils/getDiscourseNodeFormatExpression";
@@ -7,7 +13,8 @@ import { VIEW_TYPE_DISCOURSE_CONTEXT } from "~/types";
 import { PluginProvider, usePlugin } from "~/components/PluginContext";
 import { getNodeTypeById } from "~/utils/typeUtils";
 import { refreshImportedFile } from "~/utils/importNodes";
-import { useState } from "react";
+import { publishNode } from "~/utils/publishNode";
+import { useState, useEffect } from "react";
 
 type DiscourseContextProps = {
   activeFile: TFile | null;
@@ -16,6 +23,28 @@ type DiscourseContextProps = {
 const DiscourseContext = ({ activeFile }: DiscourseContextProps) => {
   const plugin = usePlugin();
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isPublished, setIsPublished] = useState(false);
+
+  useEffect(() => {
+    if (!activeFile || !plugin) {
+      setIsPublished(false);
+      return;
+    }
+    const fileMetadata = plugin.app.metadataCache.getFileCache(activeFile);
+    const frontmatter = fileMetadata?.frontmatter;
+    if (!frontmatter) {
+      setIsPublished(false);
+      return;
+    }
+    const isImported = !!frontmatter.importedFromRid;
+    const publishedToGroups = frontmatter.publishedToGroups as unknown;
+    const published =
+      !isImported &&
+      Array.isArray(publishedToGroups) &&
+      publishedToGroups.length > 0;
+    setIsPublished(published);
+  }, [activeFile, plugin]);
 
   const extractContentFromTitle = (format: string, title: string): string => {
     if (!format) return "";
@@ -48,6 +77,29 @@ const DiscourseContext = ({ activeFile }: DiscourseContextProps) => {
     }
   };
 
+  const handlePublish = async (frontmatter: FrontMatterCache) => {
+    if (!activeFile || isPublishing) return;
+
+    if (!frontmatter.nodeInstanceId) {
+      new Notice("Please sync the node first", 5000);
+      return;
+    }
+
+    setIsPublishing(true);
+    try {
+      await publishNode({ plugin, file: activeFile, frontmatter });
+      new Notice("Published successfully", 3000);
+      setIsPublished(true);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      new Notice(`Publish failed: ${errorMessage}`, 5000);
+      console.error("Publish failed:", error);
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
   const renderContent = () => {
     if (!activeFile) {
       return <div>No file is open</div>;
@@ -73,7 +125,7 @@ const DiscourseContext = ({ activeFile }: DiscourseContextProps) => {
       return <div>Unknown node type: {frontmatter.nodeTypeId}</div>;
     }
 
-    const isImported = !!frontmatter.importedFromSpaceUri;
+    const isImported = !!frontmatter.importedFromRid;
     const modifiedAt =
       typeof frontmatter.lastModified === "number"
         ? frontmatter.lastModified
@@ -85,6 +137,11 @@ const DiscourseContext = ({ activeFile }: DiscourseContextProps) => {
             modifiedAt: new Date(modifiedAt).toLocaleString(),
           }
         : null;
+
+    const canPublish =
+      plugin.settings.syncModeEnabled &&
+      !isImported &&
+      !!frontmatter.nodeTypeId;
 
     return (
       <>
@@ -107,6 +164,30 @@ const DiscourseContext = ({ activeFile }: DiscourseContextProps) => {
                 title="Refresh from source"
               >
                 {isRefreshing ? "Refreshing..." : "🔄 Refresh"}
+              </button>
+            )}
+            {canPublish && (
+              <button
+                onClick={() => {
+                  void handlePublish(frontmatter);
+                }}
+                disabled={isPublishing}
+                className={`ml-auto rounded px-2 py-1 text-xs ${
+                  isPublished
+                    ? "border border-green-600 bg-green-200 text-green-800 dark:bg-green-900/60 dark:text-green-300"
+                    : "border border-gray-400 bg-gray-100 font-medium hover:bg-gray-200 dark:border-gray-600 dark:bg-gray-800 dark:hover:bg-gray-700"
+                }`}
+                title={
+                  isPublished
+                    ? "Re-publish to lab space"
+                    : "Publish to lab space"
+                }
+              >
+                {isPublishing
+                  ? "Publishing..."
+                  : isPublished
+                    ? "✅ Published"
+                    : "Publish"}
               </button>
             )}
           </div>
