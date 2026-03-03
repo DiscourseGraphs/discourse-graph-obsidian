@@ -51,7 +51,7 @@ const getAllNodeInstanceIdsFromSupabase = async (
 ): Promise<string[]> => {
   try {
     const { data, error } = await supabaseClient
-      .from("Content")
+      .from("my_contents")
       .select("source_local_id")
       .eq("space_id", spaceId)
       .eq("scale", "document")
@@ -161,7 +161,7 @@ const getLastContentSyncTime = async (
   spaceId: number,
 ): Promise<Date> => {
   const { data } = await supabaseClient
-    .from("Content")
+    .from("my_contents")
     .select("last_modified")
     .eq("space_id", spaceId)
     .order("last_modified", { ascending: false })
@@ -175,7 +175,7 @@ const getLastNodeSchemaSyncTime = async (
   spaceId: number,
 ): Promise<Date> => {
   const { data } = await supabaseClient
-    .from("Concept")
+    .from("my_concepts")
     .select("last_modified")
     .eq("space_id", spaceId)
     .eq("is_schema", true)
@@ -191,7 +191,7 @@ const getLastRelationSchemaSyncTime = async (
   spaceId: number,
 ): Promise<Date> => {
   const { data } = await supabaseClient
-    .from("Concept")
+    .from("my_concepts")
     .select("last_modified")
     .eq("space_id", spaceId)
     .eq("is_schema", true)
@@ -207,7 +207,7 @@ const getLastRelationSyncTime = async (
   spaceId: number,
 ): Promise<Date> => {
   const { data } = await supabaseClient
-    .from("Concept")
+    .from("my_concepts")
     .select("last_modified")
     .eq("space_id", spaceId)
     .eq("is_schema", false)
@@ -265,7 +265,7 @@ const getExistingTitlesFromDatabase = async (
 ): Promise<Map<string, string>> => {
   const { data: existingDirectContent, error: directError } =
     await supabaseClient
-      .from("Content")
+      .from("my_contents")
       .select("source_local_id, text")
       .eq("space_id", spaceId)
       .eq("variant", "direct")
@@ -403,41 +403,13 @@ const buildChangedNodesFromNodes = async ({
   return changedNodes;
 };
 
-/**
- * Get all discourse nodes that have changed compared to what's stored in Supabase.
- * Detects what specifically changed: title, content, or new file
- *
- * Flow:
- * 1. Collect all discourse nodes from vault
- * 2. Query database for existing titles
- * 3. Get last sync time for the space
- * 4. For each node, detect what changed
- * 5. Return only nodes that have changes
- */
-const getChangedDiscourseNodes = async ({
-  plugin,
-  supabaseClient,
-  context,
-}: {
-  plugin: DiscourseGraphPlugin;
-  supabaseClient: DGSupabaseClient;
-  context: SupabaseContext;
-}): Promise<ObsidianDiscourseNodeData[]> => {
-  const dgNodesInVault = await collectDiscourseNodesFromVault(plugin);
-
-  return buildChangedNodesFromNodes({
-    nodes: dgNodesInVault,
-    supabaseClient,
-    context,
-  });
-};
-
-export const createOrUpdateDiscourseEmbedding = async (
+export const syncAllNodesAndRelations = async (
   plugin: DiscourseGraphPlugin,
   supabaseContext?: SupabaseContext,
+  relationsOnly?: boolean,
 ): Promise<void> => {
   try {
-    console.debug("Starting createOrUpdateDiscourseEmbedding");
+    console.debug("Starting syncAllNodesAndRelations");
 
     const context = supabaseContext ?? (await getSupabaseContext(plugin));
     if (!context) {
@@ -451,14 +423,18 @@ export const createOrUpdateDiscourseEmbedding = async (
     }
     console.debug("Supabase client:", supabaseClient);
 
-    // Get all discourse nodes that have changed compared to what's stored in Supabase
-    const allNodeInstances = await getChangedDiscourseNodes({
-      plugin,
-      supabaseClient,
-      context,
-    });
-    console.log("allNodeInstances", allNodeInstances);
-    console.debug(`Found ${allNodeInstances.length} nodes to sync`);
+    const allNodes = await collectDiscourseNodesFromVault(plugin);
+
+    const changedNodeInstances = relationsOnly
+      ? []
+      : await buildChangedNodesFromNodes({
+          nodes: allNodes,
+          supabaseClient,
+          context,
+        });
+
+    console.log("changedNodeInstances", changedNodeInstances);
+    console.debug(`Found ${changedNodeInstances.length} nodes to sync`);
 
     const accountLocalId = plugin.settings.accountLocalId;
     if (!accountLocalId) {
@@ -466,7 +442,7 @@ export const createOrUpdateDiscourseEmbedding = async (
     }
 
     await upsertNodesToSupabaseAsContentWithEmbeddings({
-      obsidianNodes: allNodeInstances,
+      obsidianNodes: changedNodeInstances,
       supabaseClient,
       context,
       accountLocalId,
@@ -474,19 +450,20 @@ export const createOrUpdateDiscourseEmbedding = async (
     });
 
     await convertDgToSupabaseConcepts({
-      nodesSince: allNodeInstances,
+      nodesSince: changedNodeInstances,
       supabaseClient,
       context,
       accountLocalId,
       plugin,
+      allNodes,
     });
 
     // When synced nodes are already published, ensure non-text assets are in storage.
-    await syncPublishedNodesAssets(plugin, allNodeInstances);
+    await syncPublishedNodesAssets(plugin, changedNodeInstances);
 
     console.debug("Sync completed successfully");
   } catch (error) {
-    console.error("createOrUpdateDiscourseEmbedding: Process failed:", error);
+    console.error("syncAllNodesAndRelations: Process failed:", error);
     throw error;
   }
 };
@@ -497,12 +474,14 @@ const convertDgToSupabaseConcepts = async ({
   context,
   accountLocalId,
   plugin,
+  allNodes,
 }: {
   nodesSince: ObsidianDiscourseNodeData[];
   supabaseClient: DGSupabaseClient;
   context: SupabaseContext;
   accountLocalId: string;
   plugin: DiscourseGraphPlugin;
+  allNodes?: DiscourseNodeInVault[];
 }): Promise<void> => {
   const lastNodeSchemaSync = (
     await getLastNodeSchemaSyncTime(supabaseClient, context.spaceId)
@@ -516,7 +495,7 @@ const convertDgToSupabaseConcepts = async ({
   const nodeTypes = plugin.settings.nodeTypes ?? [];
   const relationTypes = plugin.settings.relationTypes ?? [];
   const discourseRelations = plugin.settings.discourseRelations ?? [];
-  const allNodes = await collectDiscourseNodesFromVault(plugin);
+  allNodes = allNodes ?? (await collectDiscourseNodesFromVault(plugin));
   const allNodesById = Object.fromEntries(
     allNodes.map((n) => [n.nodeInstanceId, n]),
   );
@@ -904,7 +883,7 @@ export const initializeSupabaseSync = async (
     );
   }
 
-  await createOrUpdateDiscourseEmbedding(plugin, context).catch((error) => {
+  await syncAllNodesAndRelations(plugin, context).catch((error) => {
     new Notice(`Initial sync failed: ${error}`);
     console.error("Initial sync failed:", error);
   });
