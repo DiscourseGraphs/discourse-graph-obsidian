@@ -522,11 +522,17 @@
 .pl-5 {
   padding-left: 1.25rem;
 }
+.pl-6 {
+  padding-left: 1.5rem;
+}
 .pl-8 {
   padding-left: 2rem;
 }
 .pr-8 {
   padding-right: 2rem;
+}
+.pt-4 {
+  padding-top: 1rem;
 }
 .text-left {
   text-align: left;
@@ -559,8 +565,14 @@
 .font-semibold {
   font-weight: 600;
 }
+.uppercase {
+  text-transform: uppercase;
+}
 .italic {
   font-style: italic;
+}
+.tracking-wide {
+  letter-spacing: 0.025em;
 }
 .\!text-muted {
   color: var(--text-muted) !important;
