@@ -413,6 +413,9 @@
 .border-modifier-border {
   border-color: var(--background-modifier-border);
 }
+.border-yellow-500\/30 {
+  border-color: rgb(234 179 8 / 0.3);
+}
 .\!bg-accent {
   background-color: var(--interactive-accent) !important;
 }
@@ -475,6 +478,9 @@
 }
 .bg-white\/90 {
   background-color: rgb(255 255 255 / 0.9);
+}
+.bg-yellow-500\/10 {
+  background-color: rgb(234 179 8 / 0.1);
 }
 .object-contain {
   -o-object-fit: contain;
