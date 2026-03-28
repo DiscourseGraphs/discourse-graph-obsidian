@@ -22,6 +22,7 @@ To use the plugin prior to its public release on Obsidian's community plugin bro
 4. Install BRAT and enable it
 
 ## Install DataCore via BRAT
+Discourse Graphs relies on [DataCore](https://github.com/blacksmithgu/datacore) to do Obsidian-specific queries. To install Datacore
 
 1. Add the DataCore plugin from the BRAT settings menu or run command "Add a beta plugin for testing"
 2. Enter the repository URL: `https://github.com/blacksmithgu/datacore` and choose "Latest version"
