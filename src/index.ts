@@ -14,8 +14,9 @@ import { Settings, VIEW_TYPE_DISCOURSE_CONTEXT } from "~/types";
 import {
   addConvertSubmenu,
   isImageFile,
-  replaceImageEmbedInEditor,
+  openConvertImageToNodeModal,
 } from "~/utils/editorMenuUtils";
+import { createImageEmbedHoverExtension } from "~/utils/imageEmbedHoverIcon";
 import { registerCommands } from "~/utils/registerCommands";
 import { DiscourseContextView } from "~/components/DiscourseContextView";
 import { VIEW_TYPE_TLDRAW_DG_PREVIEW, FRONTMATTER_KEY } from "~/constants";
@@ -28,10 +29,14 @@ import ModifyNodeModal from "~/components/ModifyNodeModal";
 import { TagNodeHandler } from "~/utils/tagNodeHandler";
 import { TldrawView } from "~/components/canvas/TldrawView";
 import { NodeTagSuggestPopover } from "~/components/NodeTagSuggestModal";
+import { InlineNodeTypePicker } from "~/components/InlineNodeTypePicker";
 import { initializeSupabaseSync } from "~/utils/syncDgNodesToSupabase";
 import { FileChangeListener } from "~/utils/fileChangeListener";
 import generateUid from "~/utils/generateUid";
-import { migrateFrontmatterRelationsToRelationsJson } from "~/utils/relationsStore";
+import {
+  migrateFrontmatterRelationsToRelationsJson,
+  mergeAllRelationsJsonToRoot,
+} from "~/utils/relationsStore";
 
 export default class DiscourseGraphPlugin extends Plugin {
   settings: Settings = { ...DEFAULT_SETTINGS };
@@ -43,6 +48,10 @@ export default class DiscourseGraphPlugin extends Plugin {
 
   async onload() {
     await this.loadSettings();
+
+    await mergeAllRelationsJsonToRoot(this).catch((error) => {
+      console.error("Failed to merge relations.json files:", error);
+    });
 
     await migrateFrontmatterRelationsToRelationsJson(this).catch((error) => {
       console.error("Failed to migrate frontmatter relations:", error);
@@ -158,41 +167,11 @@ export default class DiscourseGraphPlugin extends Plugin {
             label: "Convert into",
             nodeTypes: this.settings.nodeTypes,
             onClick: (nodeType) => {
-              new ModifyNodeModal(this.app, {
-                nodeTypes: this.settings.nodeTypes,
+              openConvertImageToNodeModal({
                 plugin: this,
-                initialTitle: "",
+                imageFile: file,
                 initialNodeType: nodeType,
-                onSubmit: async ({
-                  nodeType: selectedType,
-                  title,
-                  selectedExistingNode,
-                }) => {
-                  const targetFile =
-                    selectedExistingNode ??
-                    (await createDiscourseNode({
-                      plugin: this,
-                      nodeType: selectedType,
-                      text: title,
-                    }));
-
-                  if (!targetFile) return;
-
-                  const imageLink = this.app.metadataCache.fileToLinktext(
-                    file,
-                    targetFile.path,
-                  );
-                  await this.app.vault.append(
-                    targetFile,
-                    `\n![[${imageLink}]]\n`,
-                  );
-                  replaceImageEmbedInEditor({
-                    app: this.app,
-                    imageFile: file,
-                    targetFile,
-                  });
-                },
-              }).open();
+              });
             },
           });
           return;
@@ -271,12 +250,26 @@ export default class DiscourseGraphPlugin extends Plugin {
 
         const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
         if (activeView?.editor) {
-          // Open the node tag suggest popover
-          const popover = new NodeTagSuggestPopover(
-            activeView.editor,
-            this.settings.nodeTypes,
-          );
-          popover.open();
+          const editor = activeView.editor;
+          const selectedText = editor.getSelection();
+
+          if (selectedText && selectedText.trim().length > 0) {
+            // Text is selected: open node type picker to create node from selection
+            const picker = new InlineNodeTypePicker({
+              editor,
+              nodeTypes: this.settings.nodeTypes,
+              plugin: this,
+              selectedText: selectedText.trim(),
+            });
+            picker.open();
+          } else {
+            // No selection: open the candidate node tag popover
+            const popover = new NodeTagSuggestPopover(
+              editor,
+              this.settings.nodeTypes,
+            );
+            popover.open();
+          }
         }
 
         return true;
@@ -285,6 +278,9 @@ export default class DiscourseGraphPlugin extends Plugin {
 
     // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     this.registerEditorExtension(nodeTagHotkeyExtension);
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+    this.registerEditorExtension(createImageEmbedHoverExtension(this));
   }
 
   private createStyleElement() {

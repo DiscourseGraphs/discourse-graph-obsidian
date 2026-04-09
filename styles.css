@@ -44,6 +44,9 @@
     max-width: 1536px;
   }
 }
+.pointer-events-none {
+  pointer-events: none;
+}
 .visible {
   visibility: visible;
 }
@@ -68,6 +71,9 @@
 .right-2 {
   right: 0.5rem;
 }
+.right-\[42px\] {
+  right: 42px;
+}
 .top-1 {
   top: 0.25rem;
 }
@@ -85,6 +91,9 @@
 }
 .z-\[1000\] {
   z-index: 1000;
+}
+.z-\[2\] {
+  z-index: 2;
 }
 .m-0 {
   margin: 0px;
@@ -106,6 +115,9 @@
 }
 .mb-6 {
   margin-bottom: 1.5rem;
+}
+.ml-1 {
+  margin-left: 0.25rem;
 }
 .ml-2 {
   margin-left: 0.5rem;
@@ -161,6 +173,9 @@
 .inline-block {
   display: inline-block;
 }
+.inline {
+  display: inline;
+}
 .flex {
   display: flex;
 }
@@ -193,6 +208,9 @@
 }
 .h-80 {
   height: 20rem;
+}
+.h-\[26px\] {
+  height: 26px;
 }
 .h-full {
   height: 100%;
@@ -242,6 +260,9 @@
 .w-6 {
   width: 1.5rem;
 }
+.w-\[26px\] {
+  width: 26px;
+}
 .w-full {
   width: 100%;
 }
@@ -277,6 +298,9 @@
 }
 .transform {
   transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
+}
+.cursor-\[var\(--cursor\)\] {
+  cursor: var(--cursor);
 }
 .cursor-default {
   cursor: default;
@@ -392,6 +416,9 @@
 }
 .border-solid {
   border-style: solid;
+}
+.border-none {
+  border-style: none;
 }
 .border-\[var\(--background-modifier-border\)\] {
   border-color: var(--background-modifier-border);
@@ -643,6 +670,9 @@
 .no-underline {
   text-decoration-line: none;
 }
+.opacity-0 {
+  opacity: 0;
+}
 .opacity-60 {
   opacity: 0.6;
 }
@@ -764,6 +794,9 @@
   --tw-bg-opacity: 1;
   background-color: rgb(255 255 255 / var(--tw-bg-opacity, 1));
 }
+.hover\:\!text-accent:hover {
+  color: var(--interactive-accent) !important;
+}
 .hover\:\!text-error:hover {
   color: var(--text-error) !important;
 }
@@ -784,6 +817,12 @@
 .disabled\:bg-red-300:disabled {
   --tw-bg-opacity: 1;
   background-color: rgb(252 165 165 / var(--tw-bg-opacity, 1));
+}
+.group:hover .group-hover\:pointer-events-auto {
+  pointer-events: auto;
+}
+.group:hover .group-hover\:opacity-100 {
+  opacity: 1;
 }
 @media (prefers-color-scheme: dark) {
   .dark\:border-gray-600 {
