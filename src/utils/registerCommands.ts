@@ -4,7 +4,7 @@ import { NodeTypeModal } from "~/components/NodeTypeModal";
 import ModifyNodeModal from "~/components/ModifyNodeModal";
 import { BulkIdentifyDiscourseNodesModal } from "~/components/BulkIdentifyDiscourseNodesModal";
 import { ImportNodesModal } from "~/components/ImportNodesModal";
-import { createDiscourseNode } from "./createNode";
+import { convertPageToDiscourseNode, createDiscourseNode } from "./createNode";
 import { refreshAllImportedFiles } from "./importNodes";
 import { VIEW_TYPE_MARKDOWN, VIEW_TYPE_TLDRAW_DG_PREVIEW } from "~/constants";
 import { createCanvas } from "~/components/canvas/utils/tldraw";
@@ -24,7 +24,7 @@ type ModifyNodeSubmitParams = {
   relationshipTargetFile?: TFile;
 };
 
-const createModifyNodeModalSubmitHandler = (
+export const createModifyNodeModalSubmitHandler = (
   plugin: DiscourseGraphPlugin,
   editor?: Editor,
 ): ((params: ModifyNodeSubmitParams) => Promise<void>) => {
@@ -62,49 +62,69 @@ const createModifyNodeModalSubmitHandler = (
 
 export const registerCommands = (plugin: DiscourseGraphPlugin) => {
   plugin.addCommand({
-    id: "open-node-type-menu",
-    name: "Open node type menu",
-    editorCallback: (editor: Editor) => {
-      const hasSelection = !!editor.getSelection();
-
-      if (hasSelection) {
-        new NodeTypeModal(plugin, (nodeType: DiscourseNode) => {
-          void createDiscourseNode({
-            plugin,
-            editor,
-            nodeType,
-            text: editor.getSelection().trim() || "",
-          });
-        }).open();
-      } else {
-        const currentFile =
-          plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file ||
-          undefined;
-        new ModifyNodeModal(plugin.app, {
-          nodeTypes: plugin.settings.nodeTypes,
-          plugin,
-          currentFile,
-          onSubmit: createModifyNodeModalSubmitHandler(plugin, editor),
-        }).open();
-      }
-    },
-  });
-
-  plugin.addCommand({
     id: "create-discourse-node",
     name: "Create discourse node",
     callback: () => {
-      const currentFile =
-        plugin.app.workspace.getActiveViewOfType(MarkdownView)?.file ||
-        undefined;
-      const editor =
-        plugin.app.workspace.getActiveViewOfType(MarkdownView)?.editor;
+      const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+      const currentFile = activeView?.file || undefined;
+      const editor = activeView?.editor;
+      const selectedText = editor?.getSelection()?.trim() || undefined;
       new ModifyNodeModal(plugin.app, {
         nodeTypes: plugin.settings.nodeTypes,
         plugin,
         currentFile,
+        initialTitle: selectedText,
         onSubmit: createModifyNodeModalSubmitHandler(plugin, editor),
       }).open();
+    },
+  });
+
+  plugin.addCommand({
+    id: "convert-current-page-to-discourse-node",
+    name: "Convert current page to discourse node",
+    checkCallback: (checking: boolean) => {
+      const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
+      const file = activeView?.file;
+      if (!file) return false;
+
+      if (!checking) {
+        const fileCache = plugin.app.metadataCache.getFileCache(file);
+        const frontmatter = fileCache?.frontmatter as
+          | Record<string, unknown>
+          | undefined;
+        const fileNodeTypeId =
+          typeof frontmatter?.nodeTypeId === "string"
+            ? frontmatter.nodeTypeId
+            : undefined;
+        const isAlreadyDiscourseNode =
+          !!fileNodeTypeId &&
+          plugin.settings.nodeTypes.some(
+            (nodeType) => nodeType.id === fileNodeTypeId,
+          );
+
+        if (isAlreadyDiscourseNode) {
+          new Notice("Current page is already a discourse node", 3000);
+          return true;
+        }
+
+        new ModifyNodeModal(plugin.app, {
+          nodeTypes: plugin.settings.nodeTypes,
+          plugin,
+          initialTitle: file.basename,
+          // Command palette flow should mirror file-menu conversion.
+          disableExistingNodeSearch: true,
+          onSubmit: async ({ nodeType, title }) => {
+            await convertPageToDiscourseNode({
+              plugin,
+              file,
+              nodeType,
+              title,
+            });
+          },
+        }).open();
+      }
+
+      return true;
     },
   });
 

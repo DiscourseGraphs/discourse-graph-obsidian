@@ -17,6 +17,7 @@ import {
   syncPublishedNodeAssets,
 } from "./syncDgNodesToSupabase";
 import { isProvisionalSchema } from "./typeUtils";
+import { intersection, difference } from "@repo/utils/setOperations";
 
 import type { DiscourseNodeInVault } from "./getDiscourseNodes";
 import type { SupabaseContext } from "./supabaseContext";
@@ -54,11 +55,9 @@ const publishSchema = async ({
   // Publish schema to group via ResourceAccess
   const publishResponse = await client.from("ResourceAccess").upsert(
     {
-      /* eslint-disable @typescript-eslint/naming-convention */
       account_uid: groupId,
       source_local_id: nodeTypeId,
       space_id: spaceId,
-      /* eslint-enable @typescript-eslint/naming-convention */
     },
     { ignoreDuplicates: true },
   );
@@ -68,31 +67,6 @@ const publishSchema = async ({
     console.error("Error publishing schema:", publishResponse.error);
     // Don't throw - schema publishing failure shouldn't block node publishing
   }
-};
-
-const intersection = <T>(set1: Set<T>, set2: Set<T>): Set<T> => {
-  // @ts-expect-error - Set.intersection is ES2025 feature
-  if (set1.intersection) return set1.intersection(set2); // eslint-disable-line
-  const r: Set<T> = new Set();
-  for (const x of set1) {
-    if (set2.has(x)) r.add(x);
-  }
-  return r;
-};
-
-const difference = <T>(set1: Set<T>, set2: Set<T>): Set<T> => {
-  // @ts-expect-error - Set.difference is ES2025 feature
-  if (set1.difference) return set1.difference(set2); // eslint-disable-line
-  const result = new Set(set1);
-  if (set1.size <= set2.size)
-    for (const e of set1) {
-      if (set2.has(e)) result.delete(e);
-    }
-  else
-    for (const e of set2) {
-      if (result.has(e)) result.delete(e);
-    }
-  return result;
 };
 
 export const publishNewRelation = async (
@@ -151,11 +125,9 @@ export const publishNewRelation = async (
   for (const group of targetGroups) {
     for (const id of resourceIds) {
       entries.push({
-        /* eslint-disable @typescript-eslint/naming-convention */
         account_uid: group,
         source_local_id: id,
         space_id: context.spaceId,
-        /* eslint-enable @typescript-eslint/naming-convention */
       });
     }
   }
@@ -226,11 +198,9 @@ export const publishNodeRelations = async ({
   if (resourceIds.size === 0) return;
   const publishResponse = await client.from("ResourceAccess").upsert(
     [...resourceIds.values()].map((sourceLocalId: string) => ({
-      /* eslint-disable @typescript-eslint/naming-convention */
       account_uid: myGroup,
       source_local_id: sourceLocalId,
       space_id: spaceId,
-      /* eslint-enable @typescript-eslint/naming-convention */
     })),
     { ignoreDuplicates: true },
   );
@@ -364,13 +334,11 @@ export const ensurePublishedRelationsAccuracy = async ({
     );
     if (missingPublishableIds.size > 0) {
       missingPublishRecords.push(
-        /* eslint-disable @typescript-eslint/naming-convention */
         ...[...missingPublishableIds].map((source_local_id) => ({
           source_local_id,
           space_id: context.spaceId,
           account_uid: group,
         })),
-        /* eslint-enable @typescript-eslint/naming-convention */
       );
     }
     const extraPublishableIds = difference(
@@ -479,10 +447,8 @@ export const publishNodeToGroup = async ({
   if (!skipPublishAccess) {
     const publishSpaceResponse = await client.from("SpaceAccess").upsert(
       {
-        /* eslint-disable @typescript-eslint/naming-convention */
         account_uid: myGroup,
         space_id: spaceId,
-        /* eslint-enable @typescript-eslint/naming-convention */
         permissions: "partial",
       },
       { ignoreDuplicates: true },
@@ -495,11 +461,9 @@ export const publishNodeToGroup = async ({
 
     const publishResponse = await client.from("ResourceAccess").upsert(
       {
-        /* eslint-disable @typescript-eslint/naming-convention */
         account_uid: myGroup,
         source_local_id: nodeId,
         space_id: spaceId,
-        /* eslint-enable @typescript-eslint/naming-convention */
       },
       { ignoreDuplicates: true },
     );

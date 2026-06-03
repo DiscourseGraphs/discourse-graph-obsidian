@@ -18,13 +18,13 @@ import {
 } from "~/utils/editorMenuUtils";
 import { createImageEmbedHoverExtension } from "~/utils/imageEmbedHoverIcon";
 import { createWikilinkDragExtension } from "~/utils/wikilinkDragHandler";
-import { registerCommands } from "~/utils/registerCommands";
+import {
+  registerCommands,
+  createModifyNodeModalSubmitHandler,
+} from "~/utils/registerCommands";
 import { DiscourseContextView } from "~/components/DiscourseContextView";
 import { VIEW_TYPE_TLDRAW_DG_PREVIEW, FRONTMATTER_KEY } from "~/constants";
-import {
-  convertPageToDiscourseNode,
-  createDiscourseNode,
-} from "~/utils/createNode";
+import { convertPageToDiscourseNode } from "~/utils/createNode";
 import { DEFAULT_SETTINGS } from "~/constants";
 import ModifyNodeModal from "~/components/ModifyNodeModal";
 import { TagNodeHandler } from "~/utils/tagNodeHandler";
@@ -177,6 +177,8 @@ export default class DiscourseGraphPlugin extends Plugin {
                 plugin: this,
                 imageFile: file,
                 initialNodeType: nodeType,
+                // File explorer always intends to create a new node
+                disableExistingNodeSearch: true,
               });
             },
           });
@@ -202,6 +204,8 @@ export default class DiscourseGraphPlugin extends Plugin {
                 plugin: this,
                 initialTitle: file.basename,
                 initialNodeType: nodeType,
+                // File explorer always intends to create a new node
+                disableExistingNodeSearch: true,
                 onSubmit: async ({ nodeType, title }) => {
                   await convertPageToDiscourseNode({
                     plugin: this,
@@ -222,17 +226,22 @@ export default class DiscourseGraphPlugin extends Plugin {
         if (!editor.getSelection()) return;
 
         const selection = editor.getSelection().trim();
+        const currentFile =
+          this.app.workspace.getActiveViewOfType(MarkdownView)?.file ||
+          undefined;
         addConvertSubmenu({
           menu,
           label: "Turn into discourse node",
           nodeTypes: this.settings.nodeTypes,
-          onClick: async (nodeType) => {
-            await createDiscourseNode({
+          onClick: (nodeType) => {
+            new ModifyNodeModal(this.app, {
+              nodeTypes: this.settings.nodeTypes,
               plugin: this,
-              editor,
-              nodeType,
-              text: selection,
-            });
+              initialTitle: selection,
+              initialNodeType: nodeType,
+              currentFile,
+              onSubmit: createModifyNodeModalSubmitHandler(this, editor),
+            }).open();
           },
         });
       }),
