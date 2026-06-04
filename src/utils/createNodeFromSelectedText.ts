@@ -1,4 +1,4 @@
-import { App, Editor, Notice, TFile } from "obsidian";
+import { App, createEl, createSpan, Editor, Notice, TFile } from "obsidian";
 import { DiscourseNode } from "~/types";
 import { getDiscourseNodeFormatExpression } from "./getDiscourseNodeFormatExpression";
 import { checkInvalidChars } from "./validateNodeType";
@@ -58,18 +58,14 @@ export const createDiscourseNodeFile = async ({
     }
 
     const notice = new DocumentFragment();
-    const spanEl = notice.createEl("span", {
-      text: "Created discourse node: ",
-    });
-
-    const linkEl = spanEl.createEl("a", {
-      text: formattedNodeName,
-      cls: "clickable-link",
-    });
-    linkEl.style.textDecoration = "underline";
-    linkEl.style.cursor = "pointer";
+    const wrapper = createSpan({ text: "Created discourse node: " });
+    const linkEl = createEl("a");
+    linkEl.textContent = formattedNodeName;
+    linkEl.classList.add("dg-clickable-link");
+    wrapper.appendChild(linkEl);
+    notice.appendChild(wrapper);
     linkEl.addEventListener("click", () => {
-      app.workspace.openLinkText(formattedNodeName, "", false);
+      void app.workspace.openLinkText(formattedNodeName, "", false);
     });
 
     new Notice(notice, 4000);

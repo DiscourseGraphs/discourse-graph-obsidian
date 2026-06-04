@@ -37,11 +37,9 @@ export type TldrawPluginMetaData = {
 
 export type TldrawRawData = {
   tldrawFileFormatVersion: number;
-  /* eslint-disable @typescript-eslint/no-explicit-any -- legacy tldraw-in-obsidian snapshot schema */
   // we follow the tldraw schema of tldraw-in-obsidian plugin
-  schema: any;
-  records: any;
-  /* eslint-enable @typescript-eslint/no-explicit-any */
+  schema: unknown;
+  records: unknown;
 };
 
 export type TLData = {
