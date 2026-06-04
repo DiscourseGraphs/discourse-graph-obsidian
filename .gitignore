@@ -1,0 +1,4 @@
+store-review/.local/
+node_modules/
+dist/
+.env*
