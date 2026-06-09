@@ -132,7 +132,7 @@ const RelationshipSettings = () => {
     }
 
     const modal = new ConfirmationModal(plugin.app, {
-      title: "Delete Relation",
+      title: "Delete relation",
       message,
       onConfirm: () => handleDeleteRelation(index),
     });
@@ -202,7 +202,7 @@ const RelationshipSettings = () => {
               className={`flex-1 pl-2 ${error ? "input-error" : ""}`}
               disabled={isImported}
             >
-              <option value="">Source Node Type</option>
+              <option value="">Source node type</option>
               {plugin.settings.nodeTypes.map((nodeType) => (
                 <option key={nodeType.id} value={nodeType.id}>
                   {nodeType.name}
@@ -222,7 +222,7 @@ const RelationshipSettings = () => {
               className={`flex-1 pl-2 ${error ? "input-error" : ""}`}
               disabled={isImported}
             >
-              <option value="">Relation Type</option>
+              <option value="">Relation type</option>
               {(isImported
                 ? plugin.settings.relationTypes
                 : plugin.settings.relationTypes.filter(isAcceptedSchema)
@@ -241,7 +241,7 @@ const RelationshipSettings = () => {
               className={`flex-1 pl-2 ${error ? "input-error" : ""}`}
               disabled={isImported}
             >
-              <option value="">Target Node Type</option>
+              <option value="">Target node type</option>
               {plugin.settings.nodeTypes.map((nodeType) => (
                 <option key={nodeType.id} value={nodeType.id}>
                   {nodeType.name}
@@ -339,7 +339,7 @@ const RelationshipSettings = () => {
           <div className="setting-item mt-4">
             <div className="flex gap-2">
               <button onClick={handleAddRelation} className="p-2">
-                Add Relation
+                Add relation
               </button>
             </div>
           </div>

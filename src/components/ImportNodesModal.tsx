@@ -411,7 +411,7 @@ const ImportNodesContent = ({ plugin, onClose }: ImportNodesModalProps) => {
 
     return (
       <div>
-        <h3 className="mb-2">Import Preview</h3>
+        <h3 className="mb-2">Import preview</h3>
         <p className="text-muted mb-4 text-sm">
           Review what will be imported and created.
         </p>

@@ -39,7 +39,7 @@ export const CustomContextMenu = ({
       <DefaultContextMenuContent />
       {shouldShowConvertTo && (
         <TldrawUiMenuGroup id="convert-to">
-          <TldrawUiMenuSubmenu id="convert-to-submenu" label="Convert To">
+          <TldrawUiMenuSubmenu id="convert-to-submenu" label="Convert to">
             {plugin.settings.nodeTypes.map((nodeType) => (
               <TldrawUiMenuItem
                 key={nodeType.id}

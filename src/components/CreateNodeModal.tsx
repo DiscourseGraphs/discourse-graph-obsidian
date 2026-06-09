@@ -84,7 +84,7 @@ export function CreateNodeForm({
 
   return (
     <div>
-      <h2>Create Discourse Node</h2>
+      <h2>Create discourse node</h2>
 
       <div className="setting-item">
         <div className="setting-item-name">Title</div>

@@ -371,7 +371,7 @@ export class DiscourseRelationUtil extends ShapeUtil<DiscourseRelationShape> {
           const errorMessage = `Cannot connect "${sourceNodeType?.name}" to "${targetNodeType?.name}" with "${relationType?.label}" relation`;
           showToast({
             severity: "error",
-            title: "Invalid Connection",
+            title: "Invalid connection",
             description: errorMessage,
           });
 
@@ -1183,7 +1183,7 @@ export class DiscourseRelationUtil extends ShapeUtil<DiscourseRelationShape> {
       if (relationType && !alreadyExisted) {
         showToast({
           severity: "success",
-          title: "Relation Created",
+          title: "Relation created",
           description: `Added ${relationType.label} relation between ${sourceFile.basename} and ${targetFile.basename}`,
         });
       }
@@ -1191,7 +1191,7 @@ export class DiscourseRelationUtil extends ShapeUtil<DiscourseRelationShape> {
       console.error("Failed to reify relation:", error);
       showToast({
         severity: "error",
-        title: "Failed to Save Relation",
+        title: "Failed to save relation",
         description: "Could not save relation to files",
       });
     }

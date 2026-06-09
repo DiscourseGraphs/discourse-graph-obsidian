@@ -300,7 +300,7 @@ const AddRelationship = ({
   return (
     <div className="relationship-manager">
       <div className="relationship-type-selector mb-4">
-        <label className="mb-2 block">Relationship Type:</label>
+        <label className="mb-2 block">Relationship type:</label>
         <DropdownSelect<RelationTypeOption>
           options={availableRelationTypes}
           onSelect={(option) => option && setSelectedRelationType(option)}
@@ -577,7 +577,7 @@ const CurrentRelationships = ({
     <>
       {hasAccepted && (
         <div className="current-relationships mb-6">
-          <h4 className="mb-2 text-base font-medium">Current Relationships</h4>
+          <h4 className="mb-2 text-base font-medium">Current relationships</h4>
           <ul className="border-modifier-border m-0 list-none rounded border p-0">
             {acceptedGroups.map(
               (group) =>
