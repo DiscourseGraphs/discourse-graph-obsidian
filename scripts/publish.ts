@@ -440,7 +440,7 @@ const updateMainBranch = async (
       "fetching recursive main tree",
     );
 
-    const existingBlobShasByPath = new Map(
+    const existingBlobShasByPath = new Map<string, string>(
       (existingTree.tree ?? [])
         .filter(
           (entry: any): entry is { path: string; sha: string; type: string } =>
@@ -451,6 +451,14 @@ const updateMainBranch = async (
 
     const allFiles = getAllFiles(tempDir);
     log(`Found ${allFiles.length} files to update`);
+    const normalizedAllFiles = allFiles.map((filePath) =>
+      filePath.replace(/\\/g, "/"),
+    );
+    const currentRepoFiles = new Set<string>(existingBlobShasByPath.keys());
+    const localFiles = new Set<string>(normalizedAllFiles);
+    const filesToDelete = [...currentRepoFiles].filter(
+      (repoFilePath) => !localFiles.has(repoFilePath),
+    );
     const filesToUpdate = allFiles.filter((filePath) => {
       const fullPath = path.join(tempDir, filePath);
       const content = fs.readFileSync(fullPath);
@@ -462,8 +470,9 @@ const updateMainBranch = async (
     log(
       `Detected ${filesToUpdate.length} changed files (${allFiles.length - filesToUpdate.length} unchanged skipped)`,
     );
+    log(`Detected ${filesToDelete.length} files to delete from target repo`);
 
-    if (filesToUpdate.length === 0) {
+    if (filesToUpdate.length === 0 && filesToDelete.length === 0) {
       log("No changes detected on main branch; skipping commit update");
       return;
     }
@@ -506,18 +515,26 @@ const updateMainBranch = async (
       blobs.push(...batchBlobs);
     }
 
+    const treeUpdates = blobs.map((blob) => ({
+      path: blob.path,
+      mode: "100644" as const,
+      type: "blob" as const,
+      sha: blob.sha,
+    }));
+    const treeDeletions = filesToDelete.map((filePath) => ({
+      path: filePath,
+      mode: "100644" as const,
+      type: "blob" as const,
+      sha: null,
+    }));
+
     const { data: newTree } = await requestWithRetry<any>(
       () =>
         octokit.request("POST /repos/{owner}/{repo}/git/trees", {
           owner,
           repo,
           base_tree: currentTreeSha,
-          tree: blobs.map((blob) => ({
-            path: blob.path,
-            mode: "100644" as const,
-            type: "blob" as const,
-            sha: blob.sha,
-          })),
+          tree: [...treeUpdates, ...treeDeletions],
         }),
       "creating updated git tree",
     );
@@ -554,7 +571,7 @@ const updateMainBranch = async (
     );
 
     log(`Successfully updated main branch with commit: ${newCommit.sha}`);
-    log(`Updated ${blobs.length} files`);
+    log(`Updated ${blobs.length} files and deleted ${filesToDelete.length} files`);
   } catch (error) {
     log(`Failed to update main branch: ${error}`);
     throw error;
