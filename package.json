@@ -4,14 +4,6 @@
   "description": "Discourse Graph Plugin for obsidian.md",
   "main": "dist/main.js",
   "private": true,
-  "scripts": {
-    "dev": "tsx scripts/dev.ts",
-    "build": "tsx scripts/build.ts",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "publish": "tsx scripts/publish.ts --version 0.1.0",
-    "check-types": "tsc --noEmit --skipLibCheck"
-  },
   "keywords": [],
   "author": "",
   "license": "Apache-2.0",
@@ -20,7 +12,7 @@
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/mime-types": "3.0.1",
-    "@types/node": "^20",
+    "@types/node": "catalog:",
     "@types/react": "catalog:obsidian",
     "@types/react-dom": "catalog:obsidian",
     "autoprefixer": "^10.4.21",
