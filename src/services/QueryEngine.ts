@@ -51,7 +51,7 @@ export class QueryEngine {
       return [];
     }
     if (!this.dc) {
-      return [];
+      return this.fallbackSearchDiscourseNodesByTitle(query, nodeTypeId);
     }
 
     try {
@@ -59,6 +59,9 @@ export class QueryEngine {
         ? `@page and exists(nodeTypeId) and nodeTypeId = "${nodeTypeId}"`
         : "@page and exists(nodeTypeId)";
       const potentialNodes = this.dc.query(dcQuery);
+      if (potentialNodes.length === 0) {
+        return this.fallbackSearchDiscourseNodesByTitle(query, nodeTypeId);
+      }
 
       const searchResults = potentialNodes.filter((p: DatacorePage) =>
         this.fuzzySearch(p.$name, query),
@@ -77,7 +80,7 @@ export class QueryEngine {
       return files.reverse();
     } catch (error) {
       console.error("Error in searchDiscourseNodesByTitle:", error);
-      return [];
+      return this.fallbackSearchDiscourseNodesByTitle(query, nodeTypeId);
     }
   };
 
@@ -86,7 +89,7 @@ export class QueryEngine {
    */
   getDiscourseNodeById = (nodeInstanceId: string): TFile | null => {
     if (!this.dc) {
-      return null;
+      return this.fallbackGetDiscourseNodeById(nodeInstanceId);
     }
 
     if (!nodeInstanceId.match(/^[-.+\w]+$/)) {
@@ -97,11 +100,14 @@ export class QueryEngine {
       const dcQuery = `@page and exists(nodeInstanceId) and nodeInstanceId = "${nodeInstanceId}"`;
       const potentialNodes = this.dc.query(dcQuery);
       const path = potentialNodes.at(0)?.$path;
-      if (!path) return null;
-      return this.app.vault.getFileByPath(path);
+      if (!path) return this.fallbackGetDiscourseNodeById(nodeInstanceId);
+      return (
+        this.app.vault.getFileByPath(path) ??
+        this.fallbackGetDiscourseNodeById(nodeInstanceId)
+      );
     } catch (error) {
       console.error("Error in searchDiscourseNodeById:", error);
-      return null;
+      return this.fallbackGetDiscourseNodeById(nodeInstanceId);
     }
   };
 
@@ -120,7 +126,12 @@ export class QueryEngine {
       return [];
     }
     if (!this.dc) {
-      return [];
+      return this.fallbackSearchCompatibleNodeByTitle({
+        query,
+        compatibleNodeTypeIds,
+        activeFile,
+        selectedRelationType,
+      });
     }
 
     try {
@@ -129,6 +140,14 @@ export class QueryEngine {
         .join(" or ")}`;
 
       const potentialNodes = this.dc.query(dcQuery);
+      if (potentialNodes.length === 0) {
+        return this.fallbackSearchCompatibleNodeByTitle({
+          query,
+          compatibleNodeTypeIds,
+          activeFile,
+          selectedRelationType,
+        });
+      }
       const searchResults = potentialNodes.filter((p: DatacorePage) => {
         return this.fuzzySearch(p.$name, query);
       });
@@ -176,7 +195,12 @@ export class QueryEngine {
       return finalResults;
     } catch (error) {
       console.error("Error in searchNodeByTitle:", error);
-      return [];
+      return this.fallbackSearchCompatibleNodeByTitle({
+        query,
+        compatibleNodeTypeIds,
+        activeFile,
+        selectedRelationType,
+      });
     }
   };
 
@@ -321,7 +345,7 @@ export class QueryEngine {
             if (file && file instanceof TFile) files.push(file);
           }
         }
-        return files;
+        if (files.length > 0) return files;
       } catch (error) {
         console.warn("DataCore query for imported nodes failed:", error);
       }
@@ -345,7 +369,7 @@ export class QueryEngine {
             if (file && file instanceof TFile) files.push(file);
           }
         }
-        return files;
+        if (files.length > 0) return files;
       } catch (error) {
         console.warn(
           "DataCore query for files with nodeInstanceId failed:",
@@ -378,7 +402,7 @@ export class QueryEngine {
           }
           files.push(file);
         }
-        return files;
+        if (files.length > 0) return files;
       } catch (error) {
         console.warn("DataCore query for files with nodeTypeId failed:", error);
       }
@@ -520,6 +544,81 @@ export class QueryEngine {
       }
     }
     return files;
+  }
+
+  private fallbackSearchDiscourseNodesByTitle(
+    query: string,
+    nodeTypeId?: string,
+  ): TFile[] {
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => {
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as
+          | Record<string, unknown>
+          | undefined;
+        if (!fm?.nodeTypeId) return false;
+        if (nodeTypeId && fm.nodeTypeId !== nodeTypeId) return false;
+        return this.fuzzySearch(file.basename, query);
+      })
+      .reverse();
+  }
+
+  private fallbackGetDiscourseNodeById(
+    nodeInstanceId: string,
+  ): TFile | null {
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as
+        | Record<string, unknown>
+        | undefined;
+      if (fm?.nodeInstanceId === nodeInstanceId) return file;
+    }
+    return null;
+  }
+
+  private fallbackSearchCompatibleNodeByTitle({
+    query,
+    compatibleNodeTypeIds,
+    activeFile,
+    selectedRelationType,
+  }: {
+    query: string;
+    compatibleNodeTypeIds: string[];
+    activeFile: TFile;
+    selectedRelationType: string;
+  }): TFile[] {
+    const fileCache = this.app.metadataCache.getFileCache(activeFile);
+    const rawExistingRelations =
+      fileCache?.frontmatter?.[selectedRelationType];
+    const existingRelations = Array.isArray(rawExistingRelations)
+      ? (rawExistingRelations as string[])
+      : rawExistingRelations
+        ? [String(rawExistingRelations)]
+        : [];
+    const existingRelatedFiles = existingRelations.map((relation) => {
+      const match = relation.match(/\[\[(.*?)(?:\|.*?)?\]\]/);
+      return match?.[1] ?? relation.replace(/^\[\[|\]\]$/g, "");
+    });
+
+    return this.app.vault
+      .getMarkdownFiles()
+      .filter((file) => {
+        if (file.path === activeFile.path) return false;
+        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as
+          | Record<string, unknown>
+          | undefined;
+        if (
+          !compatibleNodeTypeIds.includes(String(fm?.nodeTypeId ?? ""))
+        ) {
+          return false;
+        }
+        if (!this.fuzzySearch(file.basename, query)) return false;
+        return !existingRelatedFiles.some(
+          (existingFile) =>
+            file.basename === existingFile.replace(/\.md$/, "") ||
+            file.name === existingFile,
+        );
+      })
+      .reverse();
   }
 
   private fallbackGetFilesWithNodeTypeId(opts?: {
