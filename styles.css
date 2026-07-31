@@ -80,9 +80,6 @@
 .right-2 {
   right: 0.5rem;
 }
-.right-\[42px\] {
-  right: 42px;
-}
 .top-1 {
   top: 0.25rem;
 }
@@ -107,8 +104,8 @@
 .z-\[1000\] {
   z-index: 1000;
 }
-.z-\[2\] {
-  z-index: 2;
+.\!m-0 {
+  margin: 0px !important;
 }
 .m-0 {
   margin: 0px;
@@ -221,6 +218,9 @@
 .hidden {
   display: none;
 }
+.\!h-auto {
+  height: auto !important;
+}
 .h-12 {
   height: 3rem;
 }
@@ -251,9 +251,6 @@
 .h-9 {
   height: 2.25rem;
 }
-.h-\[28px\] {
-  height: 28px;
-}
 .h-\[min\(760px\2c 92vh\)\] {
   height: min(760px,92vh);
 }
@@ -277,6 +274,9 @@
 }
 .max-h-full {
   max-height: 100%;
+}
+.\!min-h-0 {
+  min-height: 0px !important;
 }
 .min-h-0 {
   min-height: 0px;
@@ -310,9 +310,6 @@
 }
 .w-6 {
   width: 1.5rem;
-}
-.w-\[28px\] {
-  width: 28px;
 }
 .w-\[min\(360px\2c 42\%\)\] {
   width: min(360px,42%);
@@ -500,6 +497,9 @@
 .whitespace-nowrap {
   white-space: nowrap;
 }
+.\!rounded-none {
+  border-radius: 0px !important;
+}
 .rounded {
   border-radius: 0.25rem;
 }
@@ -520,6 +520,9 @@
 }
 .rounded-xl {
   border-radius: 0.75rem;
+}
+.\!border-0 {
+  border-width: 0px !important;
 }
 .border {
   border-width: 1px;
@@ -670,6 +673,9 @@
   -o-object-fit: cover;
      object-fit: cover;
 }
+.\!p-0 {
+  padding: 0px !important;
+}
 .p-0 {
   padding: 0px;
 }
@@ -764,6 +770,9 @@
 .align-middle {
   vertical-align: middle;
 }
+.\!font-\[inherit\] {
+  font-family: inherit !important;
+}
 .text-\[10px\] {
   font-size: 10px;
 }
@@ -804,6 +813,9 @@
 .italic {
   font-style: italic;
 }
+.\!leading-\[inherit\] {
+  line-height: inherit !important;
+}
 .leading-6 {
   line-height: 1.5rem;
 }
@@ -812,6 +824,9 @@
 }
 .tracking-wide {
   letter-spacing: 0.025em;
+}
+.\!text-\[var\(--interactive-accent\)\] {
+  color: var(--interactive-accent) !important;
 }
 .\!text-muted {
   color: var(--text-muted) !important;
@@ -885,9 +900,6 @@
 .no-underline {
   text-decoration-line: none;
 }
-.opacity-0 {
-  opacity: 0;
-}
 .opacity-30 {
   opacity: 0.3;
 }
@@ -899,6 +911,11 @@
 }
 .opacity-80 {
   opacity: 0.8;
+}
+.\!shadow-none {
+  --tw-shadow: 0 0 #0000 !important;
+  --tw-shadow-colored: 0 0 #0000 !important;
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow) !important;
 }
 .shadow-2xl {
   --tw-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
@@ -1126,6 +1143,15 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 }
 .hover\:opacity-90:hover {
   opacity: 0.9;
+}
+.focus-visible\:\!outline:focus-visible {
+  outline-style: solid !important;
+}
+.focus-visible\:\!outline-2:focus-visible {
+  outline-width: 2px !important;
+}
+.focus-visible\:\!outline-offset-2:focus-visible {
+  outline-offset: 2px !important;
 }
 .disabled\:cursor-not-allowed:disabled {
   cursor: not-allowed;
@@ -5061,16 +5087,35 @@ kbd.tlui-kbd {
   }
 }
 
-.dg-image-convert-icon {
+/* Fallback for Obsidian versions without a shared ".embed-actions" wrapper. */
+.internal-embed.image-embed > .dg-image-convert-icon {
+  position: absolute;
   top: var(--size-2-2);
+  inset-inline-start: var(--size-2-2);
+  box-sizing: border-box;
+  width: 30px;
+  height: 26px;
   padding: var(--size-2-2) var(--size-2-3);
   color: var(--text-muted);
-  background-color: var(--background-primary);
+  border-radius: var(--radius-s);
+  cursor: var(--cursor);
   opacity: 0;
-  pointer-events: none;
 }
 
-.dg-image-embed-active .dg-image-convert-icon {
+.internal-embed.image-embed.is-selected > .dg-image-convert-icon {
   opacity: 1;
-  pointer-events: auto;
+  background-color: var(--background-primary);
+  z-index: 2;
+}
+
+@media (hover: hover) {
+  .internal-embed.image-embed:hover > .dg-image-convert-icon {
+    opacity: 1;
+    background-color: var(--background-primary);
+    z-index: 2;
+  }
+
+  .internal-embed.image-embed:hover > .dg-image-convert-icon:hover {
+    background-color: var(--background-secondary);
+  }
 }
