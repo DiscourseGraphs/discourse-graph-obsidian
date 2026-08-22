@@ -71,6 +71,12 @@
 .inset-0 {
   inset: 0px;
 }
+.-right-1 {
+  right: -0.25rem;
+}
+.-top-1 {
+  top: -0.25rem;
+}
 .left-1 {
   left: 0.25rem;
 }
@@ -85,6 +91,9 @@
 }
 .top-2 {
   top: 0.5rem;
+}
+.top-full {
+  top: 100%;
 }
 .z-10 {
   z-index: 10;
@@ -155,6 +164,9 @@
 .mr-3 {
   margin-right: 0.75rem;
 }
+.ms-1 {
+  margin-inline-start: 0.25rem;
+}
 .mt-0\.5 {
   margin-top: 0.125rem;
 }
@@ -218,6 +230,9 @@
 .hidden {
   display: none;
 }
+.\!h-4 {
+  height: 1rem !important;
+}
 .\!h-auto {
   height: auto !important;
 }
@@ -251,8 +266,14 @@
 .h-9 {
   height: 2.25rem;
 }
+.h-\[600px\] {
+  height: 600px;
+}
 .h-\[min\(760px\2c 92vh\)\] {
   height: min(760px,92vh);
+}
+.h-auto {
+  height: auto;
 }
 .h-full {
   height: 100%;
@@ -263,6 +284,9 @@
 .max-h-60 {
   max-height: 15rem;
 }
+.max-h-64 {
+  max-height: 16rem;
+}
 .max-h-96 {
   max-height: 24rem;
 }
@@ -271,6 +295,9 @@
 }
 .max-h-\[300px\] {
   max-height: 300px;
+}
+.max-h-\[80vh\] {
+  max-height: 80vh;
 }
 .max-h-full {
   max-height: 100%;
@@ -287,11 +314,20 @@
 .min-h-\[2\.5em\] {
   min-height: 2.5em;
 }
+.min-h-\[calc\(var\(--font-ui-medium\)\*var\(--line-height-tight\)_\+_12px\)\] {
+  min-height: calc(var(--font-ui-medium) * var(--line-height-tight) + 12px);
+}
+.\!w-4 {
+  width: 1rem !important;
+}
 .w-12 {
   width: 3rem;
 }
 .w-2 {
   width: 0.5rem;
+}
+.w-2\/5 {
+  width: 40%;
 }
 .w-20 {
   width: 5rem;
@@ -311,6 +347,12 @@
 .w-6 {
   width: 1.5rem;
 }
+.w-64 {
+  width: 16rem;
+}
+.w-\[900px\] {
+  width: 900px;
+}
 .w-\[min\(360px\2c 42\%\)\] {
   width: min(360px,42%);
 }
@@ -328,6 +370,9 @@
 }
 .min-w-24 {
   min-width: 6rem;
+}
+.min-w-3\.5 {
+  min-width: 0.875rem;
 }
 .min-w-32 {
   min-width: 8rem;
@@ -355,6 +400,9 @@
 }
 .max-w-\[400px\] {
   max-width: 400px;
+}
+.max-w-\[90vw\] {
+  max-width: 90vw;
 }
 .max-w-full {
   max-width: 100%;
@@ -506,11 +554,20 @@
 .whitespace-nowrap {
   white-space: nowrap;
 }
+.whitespace-pre-wrap {
+  white-space: pre-wrap;
+}
+.break-words {
+  overflow-wrap: break-word;
+}
 .\!rounded-none {
   border-radius: 0px !important;
 }
 .rounded {
   border-radius: 0.25rem;
+}
+.rounded-\[var\(--input-radius\)\] {
+  border-radius: var(--input-radius);
 }
 .rounded-\[var\(--radius-s\)\] {
   border-radius: var(--radius-s);
@@ -544,6 +601,9 @@
 }
 .border-b {
   border-bottom-width: 1px;
+}
+.border-r {
+  border-right-width: 1px;
 }
 .border-t {
   border-top-width: 1px;
@@ -705,6 +765,14 @@
 .p-5 {
   padding: 1.25rem;
 }
+.px-0 {
+  padding-left: 0px;
+  padding-right: 0px;
+}
+.px-1 {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+}
 .px-1\.5 {
   padding-left: 0.375rem;
   padding-right: 0.375rem;
@@ -745,6 +813,13 @@
   padding-top: 0.625rem;
   padding-bottom: 0.625rem;
 }
+.py-3 {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+.pb-0 {
+  padding-bottom: 0px;
+}
 .pb-1 {
   padding-bottom: 0.25rem;
 }
@@ -763,8 +838,14 @@
 .pl-8 {
   padding-left: 2rem;
 }
+.pr-1 {
+  padding-right: 0.25rem;
+}
 .pr-8 {
   padding-right: 2rem;
+}
+.pt-1 {
+  padding-top: 0.25rem;
 }
 .pt-4 {
   padding-top: 1rem;
@@ -783,6 +864,9 @@
 }
 .text-\[10px\] {
   font-size: 10px;
+}
+.text-\[length\:var\(--font-ui-medium\)\] {
+  font-size: var(--font-ui-medium);
 }
 .text-base {
   font-size: 1rem;
@@ -827,6 +911,9 @@
 .leading-6 {
   line-height: 1.5rem;
 }
+.leading-\[var\(--line-height-tight\)\] {
+  line-height: var(--line-height-tight);
+}
 .leading-none {
   line-height: 1;
 }
@@ -835,6 +922,9 @@
 }
 .\!text-\[var\(--interactive-accent\)\] {
   color: var(--interactive-accent) !important;
+}
+.\!text-inherit {
+  color: inherit !important;
 }
 .\!text-muted {
   color: var(--text-muted) !important;
@@ -907,6 +997,9 @@
 .no-underline {
   text-decoration-line: none;
 }
+.opacity-0 {
+  opacity: 0;
+}
 .opacity-30 {
   opacity: 0.3;
 }
@@ -953,8 +1046,21 @@
   --tw-shadow-color: var(--shadow-s);
   --tw-shadow: var(--tw-shadow-colored);
 }
+.outline-none {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
 .outline {
   outline-style: solid;
+}
+.outline-2 {
+  outline-width: 2px;
+}
+.outline-offset-1 {
+  outline-offset: 1px;
+}
+.outline-accent {
+  outline-color: var(--interactive-accent);
 }
 .blur {
   --tw-blur: blur(8px);
@@ -1103,6 +1209,12 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
   border: none !important;
   box-shadow: none !important;
 }
+.focus-within\:border-\[color\:var\(--background-modifier-border-focus\)\]:focus-within {
+  border-color: var(--background-modifier-border-focus);
+}
+.hover\:border-\[color\:var\(--background-modifier-border-hover\)\]:hover {
+  border-color: var(--background-modifier-border-hover);
+}
 .hover\:bg-blue-600:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(37 99 235 / var(--tw-bg-opacity, 1));
@@ -1114,6 +1226,9 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 .hover\:bg-gray-200:hover {
   --tw-bg-opacity: 1;
   background-color: rgb(229 231 235 / var(--tw-bg-opacity, 1));
+}
+.hover\:bg-modifier-hover:hover {
+  background-color: var(--background-modifier-hover);
 }
 .hover\:bg-red-600:hover {
   --tw-bg-opacity: 1;
@@ -1138,6 +1253,9 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 }
 .hover\:text-normal:hover {
   color: var(--text-normal);
+}
+.hover\:\!opacity-70:hover {
+  opacity: 0.7 !important;
 }
 .hover\:opacity-100:hover {
   opacity: 1;
@@ -1174,8 +1292,17 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 .disabled\:opacity-40:disabled {
   opacity: 0.4;
 }
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
 .disabled\:opacity-60:disabled {
   opacity: 0.6;
+}
+.group:focus-within .group-focus-within\:opacity-100 {
+  opacity: 1;
+}
+.group:hover .group-hover\:opacity-100 {
+  opacity: 1;
 }
 @media (prefers-color-scheme: dark) {
   .dark\:border-gray-600 {
@@ -5125,4 +5252,53 @@ kbd.tlui-kbd {
   .internal-embed.image-embed:hover > .dg-image-convert-icon:hover {
     background-color: var(--background-secondary);
   }
+}
+
+.dg-node-search-modal .dg-search-result-title span {
+  background-color: var(--text-highlight-bg);
+  color: inherit;
+  border-radius: var(--radius-s);
+  padding: 0 1px;
+}
+
+/* Only the properties Tailwind utilities cannot win here; the rest of this
+   footer's layout is utilities on the elements themselves. Obsidian sets
+   `color`, `background-color`, and `box-shadow` in `button:not(.clickable-icon)`
+   and `button:hover` — both (0,1,1), which outrank a single utility class — so a
+   utility would leave the label in `--text-normal` on an interactive-grey pill.
+   `font-size` has no inherit utility, and without it the button takes
+   `--font-ui-small` rather than the smaller type of the row it sits in. */
+.dg-node-search-modal .dg-search-footer-action,
+.dg-node-search-modal .dg-search-footer-action:hover {
+  color: inherit;
+  background-color: transparent;
+  box-shadow: none;
+  font-size: inherit;
+}
+
+/* Each key is a bordered cap, so `esc` reads as one of the set rather than as
+   emphasised text. Kept in CSS for the inherited font and em-based sizing. */
+.dg-node-search-modal .dg-search-footer-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  padding: 0 var(--size-2-1);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-primary);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1.6;
+}
+
+.dg-node-search-modal .dg-search-footer-action:hover:not(:disabled) {
+  color: var(--text-normal);
+}
+
+.dg-node-search-modal .dg-search-footer-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
