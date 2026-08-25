@@ -344,6 +344,9 @@
 .w-48 {
   width: 12rem;
 }
+.w-56 {
+  width: 14rem;
+}
 .w-6 {
   width: 1.5rem;
 }
@@ -847,6 +850,9 @@
 .pt-1 {
   padding-top: 0.25rem;
 }
+.pt-2 {
+  padding-top: 0.5rem;
+}
 .pt-4 {
   padding-top: 1rem;
 }
@@ -1025,6 +1031,11 @@
 .shadow-\[0_4px_12px_rgba\(0\2c 0\2c 0\2c 0\.15\)\] {
   --tw-shadow: 0 4px 12px rgba(0,0,0,0.15);
   --tw-shadow-colored: 0 4px 12px var(--tw-shadow-color);
+  box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+.shadow-\[shadow\:var\(--shadow-s\)\] {
+  --tw-shadow: var(--shadow-s);
+  --tw-shadow-colored: var(--shadow-s);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
 }
 .shadow-lg {
