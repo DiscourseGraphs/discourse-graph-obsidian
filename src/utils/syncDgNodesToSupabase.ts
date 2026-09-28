@@ -1,5 +1,6 @@
 import { Notice, TFile } from "obsidian";
 import { addFile } from "@repo/database/lib/files";
+import { isAssetTooLarge } from "@repo/database/lib/assetLimits";
 import mime from "mime-types";
 import { ensureNodeInstanceId } from "~/utils/nodeInstanceId";
 import type { DGSupabaseClient } from "@repo/database/lib/client";
@@ -7,6 +8,7 @@ import type { Json } from "@repo/database/dbTypes";
 import {
   getSupabaseContext,
   getLoggedInClient,
+  getLocalSpaceUri,
   type SupabaseContext,
 } from "./supabaseContext";
 import { default as DiscourseGraphPlugin } from "~/index";
@@ -20,16 +22,28 @@ import {
   discourseRelationTypeToLocalConcept,
   relationInstanceToLocalConcept,
 } from "./conceptConversion";
-import { loadRelations } from "~/utils/relationsStore";
+import { loadRelations, type RelationsFile } from "~/utils/relationsStore";
+import type { RelationInstance } from "~/types";
+import {
+  filterAvailableSourceSlotValues,
+  findStaleSourceSlotNodeIds,
+  indexSourceSlotValues,
+  SOURCE_SLOT_PROBE_SELECT,
+} from "./sourceSlot";
 import type { LocalConceptDataInput } from "@repo/database/inputTypes";
 import {
   type DiscourseNodeInVault,
   collectDiscourseNodesFromVault,
 } from "./getDiscourseNodes";
 import { isAcceptedSchema } from "./typeUtils";
+import { diffSchemaIds, findIdsMissingSchema } from "./schemaReconciliation";
 import { getTemplatePluginInfo } from "./templates";
 import { difference } from "@repo/utils/setOperations";
 import { getAllPages } from "@repo/database/lib/pagination";
+import {
+  CORE_TITLE_PROBE_SELECT,
+  partitionByCoreTitle,
+} from "@repo/database/lib/coreTitleBackfill";
 
 const DEFAULT_TIME = "1970-01-01";
 export type ChangeType = "title" | "content";
@@ -42,6 +56,7 @@ export type ObsidianDiscourseNodeData = {
   created: string;
   last_modified: string;
   changeTypes: ChangeType[];
+  sourceDocument?: string;
 };
 
 export type DiscourseNodeFileChange = {
@@ -223,12 +238,99 @@ const getLastRelationSyncTime = async (
   return new Date((data?.last_modified || DEFAULT_TIME) + "Z");
 };
 
+// Must run before the schema upsert: a stale schema holding a name makes
+// upsert_concepts refuse the local schema with that name.
+const deleteStaleSchemasAndFindMissing = async ({
+  supabaseClient,
+  spaceId,
+  localSchemaIds,
+}: {
+  supabaseClient: DGSupabaseClient;
+  spaceId: number;
+  localSchemaIds: string[];
+}): Promise<Set<string>> => {
+  const rows = await getAllPages(
+    supabaseClient
+      .from("my_concepts")
+      .select("source_local_id")
+      .eq("space_id", spaceId)
+      .eq("is_schema", true)
+      .not("source_local_id", "is", null)
+      .order("id"),
+    1000,
+  );
+  if (!Array.isArray(rows)) {
+    console.error("Could not list schemas in the database:", rows);
+    return new Set();
+  }
+  const { staleSchemaIds, missingSchemaIds } = diffSchemaIds({
+    databaseSchemaIds: rows
+      .map((row) => row.source_local_id)
+      .filter((id): id is string => id !== null),
+    localSchemaIds,
+  });
+  if (staleSchemaIds.size > 0) {
+    const { error: deleteError } = await supabaseClient
+      .from("Concept")
+      .delete()
+      .eq("space_id", spaceId)
+      .eq("is_schema", true)
+      .in("source_local_id", [...staleSchemaIds]);
+    if (deleteError)
+      console.error("Could not delete stale schemas:", deleteError);
+  }
+  return missingSchemaIds;
+};
+
+// A relation with no schema reference also has is_relation false, since that
+// column is derived from the schema, so this probe cannot filter on it.
+const findRelationIdsMissingSchema = async ({
+  supabaseClient,
+  spaceId,
+  relationInstances,
+  relationTypeIds,
+}: {
+  supabaseClient: DGSupabaseClient;
+  spaceId: number;
+  relationInstances: RelationInstance[];
+  relationTypeIds: Set<string>;
+}): Promise<Set<string>> => {
+  const rows = await getAllPages(
+    supabaseClient
+      .from("my_concepts")
+      .select("source_local_id, schema_id")
+      .eq("space_id", spaceId)
+      .eq("is_schema", false)
+      .is("schema_id", null)
+      .order("id"),
+    1000,
+  );
+  if (!Array.isArray(rows)) {
+    console.error("Could not list concepts with no schema:", rows);
+    return new Set();
+  }
+  return findIdsMissingSchema({
+    rows,
+    items: relationInstances.map((relation) => ({
+      id: relation.id,
+      typeId: relation.type,
+    })),
+    typeIds: relationTypeIds,
+  });
+};
+
 type BuildChangedNodesOptions = {
   nodes: DiscourseNodeInVault[];
   supabaseClient: DGSupabaseClient;
   context: SupabaseContext;
   changeTypesByPath?: Map<string, ChangeType[]>;
   fullSync?: boolean;
+  sourceSlotByNodeId?: Record<string, string>;
+  nodeTypeIds?: Set<string>;
+};
+
+type BuildChangedNodesResult = {
+  changedNodes: ObsidianDiscourseNodeData[];
 };
 
 const mergeChangeTypes = (
@@ -326,9 +428,11 @@ const buildChangedNodesFromNodes = async ({
   context,
   changeTypesByPath,
   fullSync = false,
-}: BuildChangedNodesOptions): Promise<ObsidianDiscourseNodeData[]> => {
+  sourceSlotByNodeId,
+  nodeTypeIds,
+}: BuildChangedNodesOptions): Promise<BuildChangedNodesResult> => {
   if (nodes.length === 0) {
-    return [];
+    return { changedNodes: [] };
   }
 
   const nodeInstanceIds = nodes.map((node) => node.nodeInstanceId);
@@ -344,11 +448,16 @@ const buildChangedNodesFromNodes = async ({
   );
   const changedNodes: ObsidianDiscourseNodeData[] = [];
   let missingConcepts: Set<string> | undefined;
+  let missingCoreTitleIds: Set<string> | undefined;
+  let staleSourceSlotIds: Set<string> | undefined;
+  let missingSchemaNodeIds: Set<string> | undefined;
   if (fullSync) {
     const existingConceptIds = await getAllPages(
       supabaseClient
         .from("my_concepts")
-        .select("source_local_id")
+        .select(
+          `${CORE_TITLE_PROBE_SELECT}, ${SOURCE_SLOT_PROBE_SELECT}, schema_id`,
+        )
         .eq("space_id", context.spaceId)
         .eq("is_relation", false)
         .eq("is_schema", false)
@@ -369,6 +478,23 @@ const buildChangedNodesFromNodes = async ({
           .filter((id) => id !== null),
       );
       missingConcepts = difference(nodeIds, dbConceptIds);
+      missingCoreTitleIds =
+        partitionByCoreTitle(existingConceptIds).missingCoreTitleIds;
+      if (sourceSlotByNodeId)
+        staleSourceSlotIds = findStaleSourceSlotNodeIds({
+          rows: existingConceptIds,
+          sourceSlotByNodeId,
+          spaceId: context.spaceId,
+        });
+      if (nodeTypeIds)
+        missingSchemaNodeIds = findIdsMissingSchema({
+          rows: existingConceptIds,
+          items: nodes.map((node) => ({
+            id: node.nodeInstanceId,
+            typeId: node.nodeTypeId,
+          })),
+          typeIds: nodeTypeIds,
+        });
     }
   }
 
@@ -389,7 +515,10 @@ const buildChangedNodesFromNodes = async ({
 
     if (
       finalChangeTypes.length === 0 &&
-      !missingConcepts?.has(node.nodeInstanceId)
+      !missingConcepts?.has(node.nodeInstanceId) &&
+      !missingCoreTitleIds?.has(node.nodeInstanceId) &&
+      !staleSourceSlotIds?.has(node.nodeInstanceId) &&
+      !missingSchemaNodeIds?.has(node.nodeInstanceId)
     ) {
       continue;
     }
@@ -405,8 +534,29 @@ const buildChangedNodesFromNodes = async ({
     });
   }
 
-  return changedNodes;
+  return { changedNodes };
 };
+
+const indexSourceSlots = ({
+  plugin,
+  nodes,
+  relations,
+}: {
+  plugin: DiscourseGraphPlugin;
+  nodes: DiscourseNodeInVault[];
+  relations: RelationInstance[];
+}): Record<string, string> =>
+  indexSourceSlotValues({
+    relations,
+    nodes,
+    localSpaceUri: getLocalSpaceUri(plugin.app),
+    nodeTypesById: Object.fromEntries(
+      (plugin.settings.nodeTypes ?? []).map((nodeType) => [
+        nodeType.id,
+        nodeType,
+      ]),
+    ),
+  });
 
 export const syncAllNodesAndRelations = async (
   plugin: DiscourseGraphPlugin,
@@ -425,14 +575,26 @@ export const syncAllNodesAndRelations = async (
     }
 
     const allNodes = await collectDiscourseNodesFromVault(plugin, true);
+    const relationInstancesData = await loadRelations(plugin);
+    const sourceSlotByNodeId = relationsOnly
+      ? undefined
+      : indexSourceSlots({
+          plugin,
+          nodes: allNodes,
+          relations: Object.values(relationInstancesData.relations),
+        });
 
-    const changedNodeInstances = relationsOnly
-      ? []
+    const { changedNodes: changedNodeInstances } = relationsOnly
+      ? { changedNodes: [] }
       : await buildChangedNodesFromNodes({
           nodes: allNodes,
           supabaseClient,
           context,
           fullSync: true,
+          sourceSlotByNodeId,
+          nodeTypeIds: new Set(
+            (plugin.settings.nodeTypes ?? []).map((nodeType) => nodeType.id),
+          ),
         });
 
     const accountLocalId = plugin.settings.accountLocalId;
@@ -452,14 +614,18 @@ export const syncAllNodesAndRelations = async (
       nodesSince: changedNodeInstances,
       supabaseClient,
       context,
-      accountLocalId,
       plugin,
       allNodes,
       fullSync: true,
+      relationInstancesData,
+      sourceSlotByNodeId,
     });
 
     // When synced nodes are already published, ensure non-text assets are in storage.
-    await syncPublishedNodesAssets(plugin, changedNodeInstances);
+    await syncPublishedNodesAssets(
+      plugin,
+      changedNodeInstances.filter((node) => node.changeTypes.length > 0),
+    );
   } catch (error) {
     console.error("syncAllNodesAndRelations: Process failed:", error);
     throw error;
@@ -470,18 +636,20 @@ const convertDgToSupabaseConcepts = async ({
   nodesSince,
   supabaseClient,
   context,
-  accountLocalId,
   plugin,
   allNodes,
   fullSync,
+  relationInstancesData,
+  sourceSlotByNodeId,
 }: {
   nodesSince: ObsidianDiscourseNodeData[];
   supabaseClient: DGSupabaseClient;
   context: SupabaseContext;
-  accountLocalId: string;
   plugin: DiscourseGraphPlugin;
   allNodes?: DiscourseNodeInVault[];
   fullSync?: boolean;
+  relationInstancesData?: RelationsFile;
+  sourceSlotByNodeId?: Record<string, string>;
 }): Promise<void> => {
   const lastNodeSchemaSync = (
     await getLastNodeSchemaSyncTime(supabaseClient, context.spaceId)
@@ -507,6 +675,20 @@ const convertDgToSupabaseConcepts = async ({
   const nodeTypesById = Object.fromEntries(
     nodeTypes.map((nodeType) => [nodeType.id, nodeType]),
   );
+
+  // Missing schemas bypass the modified-time filters below: a refused schema can
+  // be older than the newest schema the database holds.
+  const missingSchemaIds = fullSync
+    ? await deleteStaleSchemasAndFindMissing({
+        supabaseClient,
+        spaceId: context.spaceId,
+        localSchemaIds: [
+          ...nodeTypes.map((nodeType) => nodeType.id),
+          ...relationTypes.map((relationType) => relationType.id),
+          ...discourseRelations.map((relation) => relation.id),
+        ],
+      })
+    : new Set<string>();
 
   const { isEnabled: templatesEnabled, folderPath: templatesFolderPath } =
     getTemplatePluginInfo(plugin.app);
@@ -540,7 +722,8 @@ const convertDgToSupabaseConcepts = async ({
       .filter(
         (nodeType) =>
           nodeType.modified > lastNodeSchemaSync ||
-          missingTemplateLocalIds.has(nodeType.id),
+          missingTemplateLocalIds.has(nodeType.id) ||
+          missingSchemaIds.has(nodeType.id),
       )
       .map(async (nodeType) => {
         let templateContent: string | undefined;
@@ -565,7 +748,11 @@ const convertDgToSupabaseConcepts = async ({
   );
 
   const relationTypesToLocalConcepts = relationTypes
-    .filter((relationType) => relationType.modified > lastRelationSchemaSync)
+    .filter(
+      (relationType) =>
+        relationType.modified > lastRelationSchemaSync ||
+        missingSchemaIds.has(relationType.id),
+    )
     .map((relationType) =>
       discourseRelationTypeToLocalConcept(context, relationType),
     );
@@ -574,6 +761,7 @@ const convertDgToSupabaseConcepts = async ({
     .filter(
       (relationTriple) =>
         relationTriple.modified > lastRelationSchemaSync ||
+        missingSchemaIds.has(relationTriple.id) ||
         // resync if type was changed, to update labels in triple
         (relationTypesById[relationTriple.relationshipTypeId]?.modified ?? 0) >
           lastRelationSchemaSync ||
@@ -593,20 +781,50 @@ const convertDgToSupabaseConcepts = async ({
     )
     .filter((n) => !!n);
 
+  relationInstancesData =
+    relationInstancesData ?? (await loadRelations(plugin));
+  const relationInstances = Object.values(relationInstancesData.relations);
+  const relationIdsMissingSchema = fullSync
+    ? await findRelationIdsMissingSchema({
+        supabaseClient,
+        spaceId: context.spaceId,
+        relationInstances,
+        relationTypeIds: new Set(relationTypes.map((type) => type.id)),
+      })
+    : new Set<string>();
+  sourceSlotByNodeId =
+    sourceSlotByNodeId ??
+    indexSourceSlots({ plugin, nodes: allNodes, relations: relationInstances });
+  sourceSlotByNodeId = await filterAvailableSourceSlotValues({
+    sourceSlotByNodeId: Object.fromEntries(
+      nodesSince.flatMap(({ nodeInstanceId }) => {
+        const sourceId = sourceSlotByNodeId?.[nodeInstanceId];
+        return sourceId ? [[nodeInstanceId, sourceId]] : [];
+      }),
+    ),
+    client: supabaseClient,
+    spaceId: context.spaceId,
+    pendingNodeIds: new Set(nodesSince.map((node) => node.nodeInstanceId)),
+  });
   const nodeInstanceToLocalConcepts = nodesSince.map((node) => {
-    return discourseNodeInstanceToLocalConcept(context, node);
+    return discourseNodeInstanceToLocalConcept({
+      context,
+      nodeData: {
+        ...node,
+        sourceDocument: sourceSlotByNodeId[node.nodeInstanceId],
+      },
+      nodeTypesById,
+    });
   });
 
-  const relationInstancesData = await loadRelations(plugin);
-  const relationInstanceToLocalConcepts = Object.values(
-    relationInstancesData.relations,
-  )
+  const relationInstanceToLocalConcepts = relationInstances
     .filter(
       (relationInstanceData) =>
         !relationInstanceData.importedFromRid &&
         relationInstanceData.tentative !== false &&
-        (relationInstanceData.lastModified || relationInstanceData.created) >
-          lastRelationsSync,
+        ((relationInstanceData.lastModified || relationInstanceData.created) >
+          lastRelationsSync ||
+          relationIdsMissingSchema.has(relationInstanceData.id)),
     )
     .map((relationInstanceData) =>
       relationInstanceToLocalConcept({
@@ -656,6 +874,36 @@ const convertDgToSupabaseConcepts = async ({
   }
 };
 
+/**
+ * An embedded asset, kept as both halves of what a `FileReference` records: the link the
+ * note wrote, and the file that link resolves to.
+ *
+ * The two differ under Obsidian's default shortest-path setting, where a note embeds
+ * `diagram.png` while the file lives at `attachments/diagram.png`. `filepath` has to be
+ * what the content says, so a destination can match it without knowing Obsidian's link
+ * conventions; `source_path` has to be the vault path, so the folder layout survives an
+ * import.
+ */
+export type EmbeddedAttachment = { link: string; file: TFile };
+
+/** Resolves a note's embeds against the vault, dropping links that resolve to nothing. */
+export const findEmbeddedAttachments = (
+  plugin: DiscourseGraphPlugin,
+  file: TFile,
+): EmbeddedAttachment[] => {
+  const embeds = plugin.app.metadataCache.getFileCache(file)?.embeds ?? [];
+  const byLink = new Map<string, EmbeddedAttachment>();
+  for (const { link } of embeds) {
+    if (byLink.has(link)) continue;
+    const resolved = plugin.app.metadataCache.getFirstLinkpathDest(
+      link,
+      file.path,
+    );
+    if (resolved) byLink.set(link, { link, file: resolved });
+  }
+  return [...byLink.values()];
+};
+
 export const syncPublishedNodeAssets = async ({
   plugin,
   client,
@@ -669,20 +917,10 @@ export const syncPublishedNodeAssets = async ({
   nodeId: string;
   spaceId: number;
   file: TFile;
-  attachments?: TFile[];
+  attachments?: EmbeddedAttachment[];
 }): Promise<void> => {
-  if (attachments === undefined) {
-    const embeds = plugin.app.metadataCache.getFileCache(file)?.embeds ?? [];
-    attachments = embeds
-      .map(({ link }) => {
-        const attachment = plugin.app.metadataCache.getFirstLinkpathDest(
-          link,
-          file.path,
-        );
-        return attachment;
-      })
-      .filter((a) => !!a);
-  }
+  if (attachments === undefined)
+    attachments = findEmbeddedAttachments(plugin, file);
   // Always sync non-text assets when node is published to this group
   const existingFiles: string[] = [];
   const existingReferencesReq = await client
@@ -698,20 +936,31 @@ export const syncPublishedNodeAssets = async ({
     existingReferencesReq.data.map((ref) => [ref.filepath, ref]),
   ) as Record<string, (typeof existingReferencesReq.data)[0]>;
 
-  for (const attachment of attachments) {
+  for (const { link, file: attachment } of attachments) {
+    // The extension comes from the resolved file: a link may be written without one.
     const mimetype = mime.lookup(attachment.path) || "application/octet-stream";
     if (mimetype.startsWith("text/")) continue;
     // Do not use standard upload for large files
-    if (attachment.stat.size >= 6 * 1024 * 1024) {
+    if (isAssetTooLarge(attachment.stat.size)) {
       new Notice(
         `Asset file ${attachment.path} is larger than 6Mb and will not be uploaded`,
       );
       continue;
     }
-    existingFiles.push(attachment.path);
-    const existingRef = existingReferencesByPath[attachment.path];
+    // Rows are keyed on the link, so respelling a link replaces the row rather than
+    // accumulating one per spelling. Rows predating the split hold a resolved path here,
+    // match no link, and the cleanup below drops them: re-publishing corrects them.
+    existingFiles.push(link);
+    const existingRef = existingReferencesByPath[link];
+    // Rewrite the row when its bytes are stale, and also when where it says the file
+    // lives is stale. The second case is not about content: a row predating the split
+    // carries no `source_path`, and one whose link happens to equal the old stored path
+    // would never be corrected, since the asset itself never changed. It also covers an
+    // asset moved in the vault while its link stayed the same. Self-limiting: after one
+    // sync the recorded path matches and this stops firing.
     if (
       !existingRef ||
+      existingRef.source_path !== attachment.path ||
       new Date(existingRef.last_modified + "Z").valueOf() <
         attachment.stat.mtime
     ) {
@@ -720,7 +969,8 @@ export const syncPublishedNodeAssets = async ({
         client,
         spaceId,
         sourceLocalId: nodeId,
-        fname: attachment.path,
+        fname: link,
+        sourcePath: attachment.path,
         mimetype,
         created: new Date(attachment.stat.ctime),
         lastModified: new Date(attachment.stat.mtime),
@@ -817,7 +1067,6 @@ const syncChangedNodesToSupabase = async ({
     nodesSince: nodesNeedingConceptUpsert,
     supabaseClient,
     context,
-    accountLocalId,
     plugin,
   });
 
@@ -935,7 +1184,7 @@ export const syncDiscourseNodeChanges = async (
       return;
     }
 
-    const changedNodes = await buildChangedNodesFromNodes({
+    const { changedNodes } = await buildChangedNodesFromNodes({
       nodes: dgNodesInVault,
       supabaseClient,
       context,

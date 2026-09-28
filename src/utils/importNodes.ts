@@ -1,19 +1,28 @@
-import type { Json } from "@repo/database/dbTypes";
 import matter from "gray-matter";
 import { App, Notice, TFile } from "obsidian";
 import type { DGSupabaseClient } from "@repo/database/lib/client";
 import { listGroupSharedNodes } from "@repo/database/lib/sharedNodes";
 import type DiscourseGraphPlugin from "~/index";
-import { getLoggedInClient, getSupabaseContext } from "./supabaseContext";
+import {
+  getLocalSpaceUri,
+  getLoggedInClient,
+  getSupabaseContext,
+} from "./supabaseContext";
 import type { DiscourseNode, ImportableNode } from "~/types";
 import { QueryEngine } from "~/services/QueryEngine";
 import {
+  addRelationNoCheck,
+  findRelationBySourceDestinationType,
+  loadRelations,
   getImportedNodesInfo,
   getLocalNodeKeyToEndpointId,
 } from "~/utils/relationsStore";
-import { spaceUriAndLocalIdToRid } from "@repo/database/lib/rid";
+import {
+  ridToSpaceUriAndLocalId,
+  spaceUriAndLocalIdToRid,
+} from "@repo/database/lib/rid";
 import type { PostgrestResponse } from "@supabase/supabase-js";
-import type { Tables } from "@repo/database/dbTypes";
+import type { Enums, Tables } from "@repo/database/dbTypes";
 import { getSpaceNameIdFromRid } from "./spaceFromRid";
 import {
   importRelationsForImportedNodes,
@@ -21,6 +30,13 @@ import {
 } from "./importRelations";
 import { createTemplateFile } from "./templates";
 import { resolveFolderForSpaceUri } from "./importFolderMetadata";
+import { getNodeTypeById, isAcceptedSchema } from "./typeUtils";
+import {
+  type ImportedNodeContent,
+  resolveImportedNodeContent,
+} from "./importedNodeContent";
+import { decorateTitle } from "@repo/database/lib/decorateTitle";
+import { buildSchemaRid, findLocalNodeTypeMatch } from "./schemaMatching";
 
 type PublishedNode = {
   source_local_id: string;
@@ -112,53 +128,37 @@ export const getSpaceNameFromId = async (
 
 export { getSpaceNameIdFromRid } from "./spaceFromRid";
 
-export const getSpaceNameFromIds = async (
-  client: DGSupabaseClient,
-  spaceIds: number[],
-): Promise<Map<number, string>> => {
-  if (spaceIds.length === 0) {
-    return new Map();
-  }
-
-  const { data, error } = (await client
-    .from("my_spaces")
-    .select("id, name")
-    .in("id", spaceIds)) as PostgrestResponse<Tables<"Space">>;
-
-  if (error) {
-    console.error("Error fetching space names:", error);
-    return new Map();
-  }
-
-  const spaceMap = new Map<number, string>();
-  (data || []).forEach((space) => {
-    spaceMap.set(space.id, space.name);
-  });
-
-  return spaceMap;
+export type SpaceInfo = {
+  name: string;
+  url: string;
+  platform: Enums<"Platform">;
 };
 
-export const getSpaceUris = async (
+/** Spaces the user cannot see, and rows missing any of the three columns, are absent from the map. */
+export const getSpaceInfoFromIds = async (
   client: DGSupabaseClient,
   spaceIds: number[],
-): Promise<Map<number, string>> => {
+): Promise<Map<number, SpaceInfo>> => {
   if (spaceIds.length === 0) {
     return new Map();
   }
 
-  const { data, error } = (await client
+  const { data, error } = await client
     .from("my_spaces")
-    .select("id, url")
-    .in("id", spaceIds)) as PostgrestResponse<Tables<"Space">>;
+    .select("id, name, url, platform")
+    .in("id", spaceIds);
 
   if (error) {
-    console.error("Error fetching space urls:", error);
+    console.error("Error fetching spaces:", error);
     return new Map();
   }
 
-  const spaceMap = new Map<number, string>();
-  (data || []).forEach((space) => {
-    spaceMap.set(space.id, space.url);
+  const spaceMap = new Map<number, SpaceInfo>();
+  (data ?? []).forEach(({ id, name, url, platform }) => {
+    if (id === null || name === null || url === null || platform === null) {
+      return;
+    }
+    spaceMap.set(id, { name, url, platform });
   });
 
   return spaceMap;
@@ -265,14 +265,7 @@ const fetchNodeContentForImport = async ({
   client: DGSupabaseClient;
   spaceId: number;
   nodeInstanceId: string;
-}): Promise<{
-  fileName: string;
-  content: string;
-  createdAt: number;
-  modifiedAt: number;
-  authorId: number;
-  filePath?: string;
-} | null> => {
+}): Promise<ImportedNodeContent | null> => {
   const { data, error } = await client
     .from("my_contents")
     .select("text, created, last_modified, variant, metadata, author_id")
@@ -285,41 +278,7 @@ const fetchNodeContentForImport = async ({
     return null;
   }
 
-  const rows = (data ?? []) as Array<{
-    text: string | null;
-    created: string | null;
-    last_modified: string | null;
-    author_id: number | null;
-    variant: string | null;
-    metadata: Json;
-  }>;
-  const direct = rows.find((r) => r.variant === "direct");
-  const full = rows.find((r) => r.variant === "full");
-  const authorId = full?.author_id ?? direct?.author_id ?? null;
-
-  if (
-    !direct?.text ||
-    !full?.text ||
-    full.created === null ||
-    full.last_modified === null ||
-    authorId === null
-  ) {
-    return null;
-  }
-
-  const filePath: string | undefined =
-    typeof direct.metadata === "object" &&
-    typeof (direct.metadata as Record<string, any>).filePath === "string"
-      ? (direct.metadata as Record<string, any>).filePath
-      : undefined;
-  return {
-    fileName: direct.text,
-    content: full.text,
-    createdAt: new Date(full.created + "Z").valueOf(),
-    modifiedAt: new Date(full.last_modified + "Z").valueOf(),
-    filePath,
-    authorId,
-  };
+  return resolveImportedNodeContent(data ?? []);
 };
 
 type NodeTypeSchemaForInstance = {
@@ -327,7 +286,13 @@ type NodeTypeSchemaForInstance = {
   name: string;
 };
 
-export const fetchNodeTypeSchemasForInstances = async ({
+type NodeInstanceImportInfo = {
+  schema?: NodeTypeSchemaForInstance;
+  coreTitle?: string;
+  sourceDocumentId?: number;
+};
+
+export const fetchNodeImportInfoForInstances = async ({
   client,
   spaceId,
   nodeInstanceIds,
@@ -335,12 +300,14 @@ export const fetchNodeTypeSchemasForInstances = async ({
   client: DGSupabaseClient;
   spaceId: number;
   nodeInstanceIds: string[];
-}): Promise<Map<string, NodeTypeSchemaForInstance>> => {
-  const result = new Map<string, NodeTypeSchemaForInstance>();
+}): Promise<Map<string, NodeInstanceImportInfo>> => {
+  const result = new Map<string, NodeInstanceImportInfo>();
 
   const { data: instanceRows, error: instanceError } = await client
     .from("my_concepts")
-    .select("source_local_id, schema_id")
+    .select(
+      "source_local_id, schema_id, core_title:literal_content->>core_title, sourceDocument:reference_content->sourceDocument",
+    )
     .eq("space_id", spaceId)
     .eq("is_schema", false)
     .eq("is_relation", false)
@@ -358,35 +325,44 @@ export const fetchNodeTypeSchemasForInstances = async ({
         .filter((id): id is number => id !== null),
     ),
   ];
-  if (schemaIds.length === 0) return result;
-
-  const { data: schemaRows, error: schemaError } = await client
-    .from("my_concepts")
-    .select("id, source_local_id, name")
-    .eq("space_id", spaceId)
-    .eq("is_schema", true)
-    .eq("is_relation", false)
-    .in("id", schemaIds);
-
-  if (schemaError || !schemaRows) {
-    console.error("Error fetching node type schemas:", schemaError);
-    return result;
-  }
 
   const schemasById = new Map<number, NodeTypeSchemaForInstance>();
-  for (const row of schemaRows) {
-    if (row.id !== null && row.source_local_id !== null && row.name !== null) {
-      schemasById.set(row.id, {
-        nodeTypeId: row.source_local_id,
-        name: row.name,
-      });
+  if (schemaIds.length > 0) {
+    const { data: schemaRows, error: schemaError } = await client
+      .from("my_concepts")
+      .select("id, source_local_id, name")
+      .eq("space_id", spaceId)
+      .eq("is_schema", true)
+      .eq("is_relation", false)
+      .in("id", schemaIds);
+
+    if (schemaError || !schemaRows) {
+      console.error("Error fetching node type schemas:", schemaError);
+    } else {
+      for (const row of schemaRows) {
+        if (
+          row.id !== null &&
+          row.source_local_id !== null &&
+          row.name !== null
+        ) {
+          schemasById.set(row.id, {
+            nodeTypeId: row.source_local_id,
+            name: row.name,
+          });
+        }
+      }
     }
   }
 
   for (const row of instanceRows) {
-    if (row.source_local_id === null || row.schema_id === null) continue;
-    const schema = schemasById.get(row.schema_id);
-    if (schema) result.set(row.source_local_id, schema);
+    if (row.source_local_id === null) continue;
+    result.set(row.source_local_id, {
+      schema:
+        row.schema_id === null ? undefined : schemasById.get(row.schema_id),
+      coreTitle: row.core_title ?? undefined,
+      sourceDocumentId:
+        typeof row.sourceDocument === "number" ? row.sourceDocument : undefined,
+    });
   }
 
   return result;
@@ -435,13 +411,14 @@ const fetchFileReferences = async ({
   Array<{
     filepath: string;
     filehash: string;
+    sourcePath: string | null;
     created: number;
     last_modified: number;
   }>
 > => {
   const { data, error } = (await client
     .from("my_file_references")
-    .select("filepath, filehash, created, last_modified")
+    .select("filepath, filehash, source_path, created, last_modified")
     .eq("space_id", spaceId)
     .eq("source_local_id", nodeInstanceId)) as PostgrestResponse<
     Tables<"FileReference">
@@ -452,12 +429,23 @@ const fetchFileReferences = async ({
     return [];
   }
 
-  return data.map(({ filepath, filehash, created, last_modified }) => ({
-    filepath,
-    filehash,
-    created: created ? new Date(created + "Z").valueOf() : 0,
-    last_modified: last_modified ? new Date(last_modified + "Z").valueOf() : 0,
-  }));
+  return data.map(
+    ({
+      filepath,
+      filehash,
+      source_path: sourcePath,
+      created,
+      last_modified,
+    }) => ({
+      filepath,
+      filehash,
+      sourcePath,
+      created: created ? new Date(created + "Z").valueOf() : 0,
+      last_modified: last_modified
+        ? new Date(last_modified + "Z").valueOf()
+        : 0,
+    }),
+  );
 };
 
 const downloadFileFromStorage = async ({
@@ -580,6 +568,11 @@ const updateMarkdownAssetLinks = ({
   };
 
   // Look up new path by link as written in content: use canonical form (resolve relative + strip import prefix).
+  /**
+   * The vault path this run wrote for a link, if it wrote one. Used as it stands: the
+   * file is too new for the metadata cache, so resolving through it would fail and leave
+   * the original link in the note.
+   */
   const getNewPathForLink = (linkPath: string): string | undefined => {
     const canonical = normalizePathForLookup(
       getLinkCanonicalForMatch(linkPath),
@@ -642,17 +635,8 @@ const updateMarkdownAssetLinks = ({
         return getRelativeLinkPath(importedAssetFile.path);
       }
 
-      // Direct lookup from pathMapping (record built when we downloaded each asset)
       const newPath = getNewPathForLink(path);
-      if (newPath) {
-        const newFile = app.metadataCache.getFirstLinkpathDest(
-          newPath,
-          targetFile.path,
-        );
-        if (newFile) {
-          return getRelativeLinkPath(newFile.path);
-        }
-      }
+      if (newPath) return getRelativeLinkPath(newPath);
 
       // Only resolve to files under import/{spaceName}/ so we don't point at the wrong vault's files
       const resolvedFile = app.metadataCache.getFirstLinkpathDest(
@@ -715,6 +699,12 @@ const updateMarkdownAssetLinks = ({
     markdownLinkRegex,
     (match, linkText: string, linkPath: string) => {
       if (!linkPath) return match;
+      // Resolve by row before looking at the shape of the link: a Roam-origin asset is
+      // referenced by its storage URL. Matched on the raw link, because the decoding
+      // below would mangle the percent-escaping a storage URL carries.
+      const mappedFromUrl = getNewPathForLink(linkPath);
+      if (mappedFromUrl)
+        return `[${linkText}](${encodePathForMarkdownLink(getRelativeLinkPath(mappedFromUrl))})`;
       linkPath = linkPath
         .split("/")
         .map((segment) => {
@@ -725,6 +715,7 @@ const updateMarkdownAssetLinks = ({
           }
         })
         .join("/");
+      // A URL with no mapping is genuinely external and is left exactly as written.
       if (linkPath.startsWith("http://") || linkPath.startsWith("https://")) {
         return match;
       }
@@ -737,40 +728,139 @@ const updateMarkdownAssetLinks = ({
   const markdownImageRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
   updatedContent = updatedContent.replace(
     markdownImageRegex,
-    (match, alt, linkPath) => {
+    (match, alt: string, linkPath: string) => {
       // Remove optional title from linkPath: "path" or "path title"
       const cleanPath = linkPath.replace(/\s+"[^"]*"$/, "").trim();
 
-      // Skip external URLs
-      if (cleanPath.startsWith("http://") || cleanPath.startsWith("https://")) {
-        return match;
+      const isExternalUrl =
+        cleanPath.startsWith("http://") || cleanPath.startsWith("https://");
+      // Resolve by row, not by link shape: a mapped URL is one we now hold locally, an
+      // unmapped one is genuinely external and is left as written.
+      if (isExternalUrl) {
+        const mappedFromUrl = getNewPathForLink(cleanPath);
+        if (!mappedFromUrl) return match;
+        return `![${alt}](${encodePathForMarkdownLink(getRelativeLinkPath(mappedFromUrl))})`;
       }
 
       // First, try to find if this link resolves to one of our imported assets
       const importedAssetFile = findImportedAssetFile(cleanPath);
       if (importedAssetFile) {
-        const linkText = getRelativeLinkPath(importedAssetFile.path);
+        const linkText = encodePathForMarkdownLink(
+          getRelativeLinkPath(importedAssetFile.path),
+        );
         return `![${alt}](${linkText})`;
       }
 
-      // Direct lookup from pathMapping (record built when we downloaded each asset)
       const newPath = getNewPathForLink(cleanPath);
-      if (newPath) {
-        const newFile = app.metadataCache.getFirstLinkpathDest(
-          newPath,
-          targetFile.path,
-        );
-        if (newFile) {
-          const linkText = getRelativeLinkPath(newFile.path);
-          return `![${alt}](${linkText})`;
-        }
-      }
+      if (newPath)
+        return `![${alt}](${encodePathForMarkdownLink(getRelativeLinkPath(newPath))})`;
 
       return match;
     },
   );
 
   return updatedContent;
+};
+
+/**
+ * A variant of a colliding path, distinguished by the asset's own content hash:
+ * `report.png` becomes `report-1a2b3c4d.png`.
+ *
+ * Keyed on the hash rather than a counter so the name is stable: a re-import has to land
+ * on the same path, or it renames the file and leaves the previous copy behind.
+ */
+const disambiguateAssetPath = (
+  assetPath: string,
+  filehash: string,
+  suffixLength = 8,
+): string => {
+  const suffix = `-${filehash.slice(0, suffixLength)}`;
+  const lastSlash = assetPath.lastIndexOf("/");
+  const dir = lastSlash === -1 ? "" : assetPath.slice(0, lastSlash + 1);
+  const name = assetPath.slice(lastSlash + 1);
+  const lastDot = name.lastIndexOf(".");
+  // `lastDot <= 0` covers a name with no extension and a leading-dot name alike.
+  return lastDot <= 0
+    ? `${dir}${name}${suffix}`
+    : `${dir}${name.slice(0, lastDot)}${suffix}${name.slice(lastDot)}`;
+};
+
+/**
+ * SHA-256 of a file in the vault, in the same lowercase hex `addFile` stores, so a file
+ * already sitting at a target path can be compared against the reference being imported.
+ */
+const hashOfVaultFile = async (
+  plugin: DiscourseGraphPlugin,
+  file: TFile,
+): Promise<string> => {
+  const bytes = await plugin.app.vault.readBinary(file);
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes));
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+/** Stands in for a hash when a folder occupies a path; never equal to a SHA-256 hex. */
+const FOLDER_OCCUPANT = "folder";
+
+/**
+ * Where an asset should land, given that something may already be there.
+ *
+ * The import folder is shared by every node imported from a space, so a collision is
+ * usually between two notes' assets rather than two of one note's. That rules out
+ * deciding from the importing note's bookkeeping: the only reliable question is what the
+ * bytes already at that path are. Same content reuses the copy another node imported,
+ * different content takes a `disambiguateAssetPath` suffix. Throws when every suffixed
+ * path holds different content, so the per-asset error path reports it.
+ */
+const resolveAssetTargetPath = async ({
+  plugin,
+  candidatePath,
+  filehash,
+  claimedPaths,
+}: {
+  plugin: DiscourseGraphPlugin;
+  candidatePath: string;
+  filehash: string;
+  claimedPaths: Map<string, string>;
+}): Promise<string> => {
+  const occupantHash = async (path: string): Promise<string | undefined> => {
+    // Claims from earlier in this run come first: the vault has not indexed them yet.
+    const claimed = claimedPaths.get(path);
+    if (claimed !== undefined) return claimed;
+    const existing = plugin.app.vault.getAbstractFileByPath(path);
+    if (existing === null) return undefined;
+    // A folder cannot be written over either, so it counts as a collision.
+    return existing instanceof TFile
+      ? await hashOfVaultFile(plugin, existing)
+      : FOLDER_OCCUPANT;
+  };
+
+  const candidateHash = await occupantHash(candidatePath);
+  if (candidateHash === undefined || candidateHash === filehash)
+    return candidatePath;
+
+  const suffixed = disambiguateAssetPath(candidatePath, filehash);
+  const suffixedHash = await occupantHash(suffixed);
+  if (suffixedHash === undefined || suffixedHash === filehash) return suffixed;
+
+  // Two different assets sharing a name and a hash prefix. Vanishingly unlikely, but the
+  // failure it would otherwise cause is a silent overwrite, so fall back to the full hash.
+  const fullySuffixed = disambiguateAssetPath(
+    candidatePath,
+    filehash,
+    filehash.length,
+  );
+  const fullySuffixedHash = await occupantHash(fullySuffixed);
+  if (fullySuffixedHash === undefined || fullySuffixedHash === filehash)
+    return fullySuffixed;
+
+  // Different bytes under a name carrying this asset's full hash can only be a file
+  // edited or placed there by hand. No further name would stay stable across
+  // re-imports, so the asset is refused rather than written over that file.
+  throw new Error(
+    `No free path for asset ${candidatePath}: ${fullySuffixed} holds different content`,
+  );
 };
 
 /** Path of an asset relative to the note's directory (vault-relative). If asset is not under note dir, returns full path. */
@@ -821,6 +911,12 @@ const importAssetsForNode = async ({
     pathMapping.set(normalizePathForLookup(oldPath), newPath);
   };
 
+  /** Undoes the above, so a reference whose asset failed keeps its original link. */
+  const unsetPathMapping = (oldPath: string): void => {
+    pathMapping.delete(oldPath);
+    pathMapping.delete(normalizePathForLookup(oldPath));
+  };
+
   // Fetch FileReference records for the node
   const fileReferences = await fetchFileReferences({
     client,
@@ -844,10 +940,21 @@ const importAssetsForNode = async ({
       : {};
   // importedAssets format: { filehash: vaultPath }
 
+  // Which vault path holds which asset, for paths this run has already written. The
+  // vault is the authority, since the import folder is shared across nodes; this covers
+  // only what the vault is too fresh to report.
+  const claimedPaths = new Map<string, string>();
+  for (const [hash, path] of Object.entries(importedAssets))
+    claimedPaths.set(path, hash);
+
   // Process each file reference
   for (const fileRef of fileReferences) {
+    // Hoisted so the catch can release the claim staked below. Safe to drop even when
+    // the throw came after the write: `resolveAssetTargetPath` then falls back to the
+    // vault, which holds the file and answers for it.
+    let claimedTargetPath: string | undefined;
     try {
-      const { filepath, filehash } = fileRef;
+      const { filepath, filehash, sourcePath } = fileRef;
 
       // Check if we already have a file for this hash
       const existingAssetPath: string | undefined = importedAssets[filehash];
@@ -862,29 +969,55 @@ const importAssetsForNode = async ({
       }
 
       let overwritePath: string | undefined;
+      // Set when the copy already recorded for this hash is current, so the path is
+      // reused as it stands and nothing is written.
+      let reuseWithoutWriting = false;
       if (existingFile) {
         const refLastModifiedMs = fileRef.last_modified || 0;
         const localModifiedAfterRef =
           refLastModifiedMs > 0 && existingFile.stat.mtime > refLastModifiedMs;
-        if (!localModifiedAfterRef) {
-          setPathMapping(filepath, existingFile.path);
-          continue;
-        }
+        reuseWithoutWriting = !localModifiedAfterRef;
         overwritePath = existingFile.path;
       }
 
       // Target path: import/{spaceName}/{path relative to note}. If sourceNotePath is set and asset
       // is under the note's directory, use that relative path so assets sit under import/{space}/.
+      // Where the asset lands comes from `source_path`, where the publishing platform
+      // kept it. `filepath` is only what the content refers to: for a Roam-origin row a
+      // storage URL, which would make a vault name carrying an access token. A row
+      // predating `source_path` falls back to the old behaviour.
+      const localPath = sourcePath ?? filepath;
       const pathForImport =
         originalNodePath !== undefined
-          ? getAssetPathRelativeToNote(filepath, originalNodePath)
-          : filepath;
-      const sanitizedAssetPath = pathForImport
-        .split("/")
-        .map(sanitizeFileName)
-        .join("/");
+          ? getAssetPathRelativeToNote(localPath, originalNodePath)
+          : localPath;
+      const sanitizedAssetPath = sanitizePathForImport(pathForImport);
+      // A name made entirely of dots, or of characters `sanitizeFileName` strips,
+      // sanitizes away to nothing and would leave the asset addressed to its own folder.
+      // The hash stands in, being the one identifier every reference carries.
+      //
+      // It recovers no extension, so the asset does not render inline, though its link
+      // resolves and its bytes are intact. Naming the type would mean a mimetype on
+      // `FileReference`, which the design rejected on stronger grounds; sniffing
+      // `fileContent` below is the cheaper route if it is ever wanted.
+      const candidatePath = `${importBasePath}/${
+        sanitizedAssetPath || `asset-${filehash.slice(0, 8)}`
+      }`;
       const targetPath =
-        overwritePath ?? `${importBasePath}/${sanitizedAssetPath}`;
+        overwritePath ??
+        (await resolveAssetTargetPath({
+          plugin,
+          candidatePath,
+          filehash,
+          claimedPaths,
+        }));
+      claimedPaths.set(targetPath, filehash);
+      claimedTargetPath = targetPath;
+      // The one place a reference is recorded as resolving locally, true as soon as the
+      // path is known and taken back by the failure paths below. Setting it per branch
+      // is what previously let a path through the loop forget it.
+      setPathMapping(filepath, targetPath);
+      if (reuseWithoutWriting) continue;
 
       // Ensure all parent folders exist before writing
       const pathParts = targetPath.split("/");
@@ -906,7 +1039,6 @@ const importAssetsForNode = async ({
           const remoteIsNewer =
             refLastModifiedMs > 0 && refLastModifiedMs > localMtimeMs;
           if (!localModifiedAfterRef && !remoteIsNewer) {
-            setPathMapping(filepath, targetPath);
             await plugin.app.fileManager.processFrontMatter(
               targetMarkdownFile,
               (fm) => {
@@ -936,6 +1068,12 @@ const importAssetsForNode = async ({
       });
 
       if (!fileContent) {
+        // The bytes never landed, so both claims staked before the download go back.
+        // Keeping the mapping would point the note at a path this run never wrote,
+        // replacing a link that still resolves with a dead one; keeping the claim would
+        // suffix a later reference away from a path nothing occupies.
+        unsetPathMapping(filepath);
+        claimedPaths.delete(targetPath);
         errors.push(`Failed to download file: ${filepath}`);
         continue;
       }
@@ -973,10 +1111,12 @@ const importAssetsForNode = async ({
         },
         stat,
       );
-
-      // Track path mapping (raw + normalized key so updateMarkdownAssetLinks can lookup by link text)
-      setPathMapping(filepath, targetPath);
     } catch (error) {
+      // The asset did not land, so the note keeps the link it arrived with and the path
+      // it was headed for goes back on offer.
+      unsetPathMapping(fileRef.filepath);
+      if (claimedTargetPath !== undefined)
+        claimedPaths.delete(claimedTargetPath);
       const errorMsg = `Error importing asset ${fileRef.filepath}: ${error}`;
       errors.push(errorMsg);
       console.error(errorMsg, error);
@@ -998,13 +1138,33 @@ const sanitizeFileName = (fileName: string): string => {
     .trim();
 };
 
-/** Sanitize each path segment for use under import folder (preserves source vault folder structure). */
+/**
+ * Sanitize each path segment for use under the import folder, preserving the source
+ * vault's folder structure.
+ *
+ * Segments arrive from a `FileReference` row, so they are remote input. The path is
+ * normalized rather than filtered: a user may have written it by hand, and existing
+ * imports sit at the resolved location, so `a/../b.png` must keep landing on `b.png` or
+ * a re-import writes a second copy beside the first.
+ *
+ * A `..` that would climb past the import folder is dropped instead, which is the escape
+ * this exists to stop and the one place it disagrees with the source. A segment that
+ * sanitizes away to nothing is dropped too, since an empty segment breaks folder
+ * creation. Neither is rejected, so an oddly named asset still imports.
+ */
 const sanitizePathForImport = (path: string): string => {
-  return path
-    .split("/")
-    .map((segment) => sanitizeFileName(segment))
-    .filter(Boolean)
-    .join("/");
+  const segments: string[] = [];
+  for (const rawSegment of path.split("/")) {
+    const segment = sanitizeFileName(rawSegment);
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      // Empty stack means this would climb out of the import folder: drop it.
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.join("/");
 };
 
 type ParsedFrontmatter = {
@@ -1084,20 +1244,13 @@ export const mapNodeTypeIdToLocal = async ({
 
   const schemaName = schemaData.name;
 
-  // Prefer match by node type ID (imported type may already exist locally with same id)
-  const matchById = plugin.settings.nodeTypes.find(
-    (nt) => nt.id === sourceNodeTypeId,
-  );
-  if (matchById) {
-    return matchById.id;
-  }
-
-  // Fall back to match by name
-  const matchingLocalNodeType = plugin.settings.nodeTypes.find(
-    (nt) => nt.name === schemaName,
-  );
-  if (matchingLocalNodeType) {
-    return matchingLocalNodeType.id;
+  const localMatch = findLocalNodeTypeMatch({
+    localNodeTypes: plugin.settings.nodeTypes,
+    id: sourceNodeTypeId,
+    name: schemaName,
+  });
+  if (localMatch) {
+    return localMatch.id;
   }
 
   // No matching local nodeType: create one from literal_content and add to settings
@@ -1107,11 +1260,10 @@ export const mapNodeTypeIdToLocal = async ({
   );
 
   const now = new Date().getTime();
-  const importedFromRid = spaceUriAndLocalIdToRid(
-    sourceSpaceUri,
-    sourceNodeTypeId,
-    "schema",
-  );
+  const importedFromRid = buildSchemaRid({
+    spaceUri: sourceSpaceUri,
+    localId: sourceNodeTypeId,
+  });
 
   const newNodeType: DiscourseNode = {
     id: sourceNodeTypeId,
@@ -1159,8 +1311,6 @@ export const mapNodeTypeIdToLocal = async ({
 
 const processFileContent = async ({
   plugin,
-  client,
-  sourceSpaceId,
   sourceSpaceUri,
   rawContent,
   filePath,
@@ -1168,11 +1318,9 @@ const processFileContent = async ({
   importedModifiedAt,
   authorId,
   nodeInstanceId,
-  nodeTypeIdFromConcept,
+  nodeTypeId,
 }: {
   plugin: DiscourseGraphPlugin;
-  client: DGSupabaseClient;
-  sourceSpaceId: number;
   sourceSpaceUri: string;
   rawContent: string;
   filePath: string;
@@ -1180,25 +1328,9 @@ const processFileContent = async ({
   importedModifiedAt?: number;
   authorId?: number;
   nodeInstanceId: string;
-  nodeTypeIdFromConcept?: string;
-}): Promise<
-  { file: TFile; error?: never } | { file?: never; error: string }
-> => {
-  // 1. Parse frontmatter from rawContent (metadataCache is updated async and is
-  //    often empty immediately after create/modify) and resolve the node type
-  //    before any vault write, so a failed lookup leaves existing files untouched.
-  const { frontmatter } = parseFrontmatter(rawContent);
-  const sourceNodeTypeId =
-    typeof frontmatter.nodeTypeId === "string"
-      ? frontmatter.nodeTypeId
-      : nodeTypeIdFromConcept;
-  if (sourceNodeTypeId === undefined) {
-    return {
-      error: "importedNode missing sourceNodeTypeId",
-    };
-  }
-
-  // 2. Create or update the file with the fetched content.
+  nodeTypeId: string;
+}): Promise<TFile> => {
+  // Create or update the file with the fetched content.
   // On create, set file metadata (ctime/mtime) to original vault dates via vault adapter.
   let file: TFile | null = plugin.app.vault.getFileByPath(filePath);
   const stat =
@@ -1214,19 +1346,11 @@ const processFileContent = async ({
     await plugin.app.vault.process(file, () => rawContent, stat);
   }
 
-  const mappedNodeTypeId = await mapNodeTypeIdToLocal({
-    plugin,
-    client,
-    sourceSpaceId,
-    sourceSpaceUri,
-    sourceNodeTypeId,
-  });
-
   await plugin.app.fileManager.processFrontMatter(
     file,
     (fm) => {
       const record = fm as Record<string, unknown>;
-      record.nodeTypeId = mappedNodeTypeId;
+      record.nodeTypeId = nodeTypeId;
       record.nodeInstanceId = nodeInstanceId;
       record.importedFromRid = spaceUriAndLocalIdToRid(
         sourceSpaceUri,
@@ -1239,15 +1363,208 @@ const processFileContent = async ({
     stat,
   );
 
-  return { file };
+  return file;
 };
 
-export const importSelectedNodes = async ({
+const importSourceDocumentRelations = async ({
   plugin,
-  selectedNodes,
-  onProgress,
-  precomputedData,
+  client,
+  localSpaceId,
+  spaceUri,
+  nodeImportInfoByInstance,
+  importedFiles,
 }: {
+  plugin: DiscourseGraphPlugin;
+  client: DGSupabaseClient;
+  localSpaceId: number;
+  spaceUri: string;
+  nodeImportInfoByInstance: Map<string, NodeInstanceImportInfo>;
+  importedFiles: Map<string, TFile>;
+}): Promise<void> => {
+  const nodesWithSource = [...nodeImportInfoByInstance].flatMap(
+    ([nodeId, info]) => {
+      const file = importedFiles.get(
+        spaceUriAndLocalIdToRid(spaceUri, nodeId, "note"),
+      );
+      return file && info.sourceDocumentId !== undefined
+        ? [{ file, nodeId, sourceDocumentId: info.sourceDocumentId }]
+        : [];
+    },
+  );
+  if (nodesWithSource.length === 0) return;
+
+  const { data: sources, error } = await client
+    .from("my_concepts")
+    .select("id, source_local_id, space_id")
+    .eq("is_schema", false)
+    .eq("is_relation", false)
+    .in("id", [
+      ...new Set(nodesWithSource.map((node) => node.sourceDocumentId)),
+    ]);
+  if (error) throw error;
+
+  const sourceSpaceIds = [
+    ...new Set(
+      (sources ?? []).flatMap((source) =>
+        source.space_id === null ? [] : [source.space_id],
+      ),
+    ),
+  ];
+  const sourceSpaceInfo = await getSpaceInfoFromIds(client, sourceSpaceIds);
+  const queryEngine = new QueryEngine(plugin.app);
+  const sourceFiles = new Map<number, TFile>();
+  const pendingSources = new Map<string, ImportableNode>();
+  const sourceRids = new Map<number, string>();
+  for (const source of sources ?? []) {
+    if (
+      source.id === null ||
+      source.space_id === null ||
+      source.source_local_id === null
+    )
+      continue;
+    const sourceSpaceUri = sourceSpaceInfo.get(source.space_id)?.url;
+    if (!sourceSpaceUri) continue;
+    const rid = spaceUriAndLocalIdToRid(
+      sourceSpaceUri,
+      source.source_local_id,
+      "note",
+    );
+    sourceRids.set(source.id, rid);
+    const file =
+      importedFiles.get(rid) ??
+      (source.space_id === localSpaceId
+        ? queryEngine
+            .getFilesWithNodeTypeId({ excludeImported: true })
+            .find(
+              (file) =>
+                plugin.app.metadataCache.getFileCache(file)?.frontmatter
+                  ?.nodeInstanceId === source.source_local_id,
+            )
+        : queryEngine.getFileByImportedFromRid(rid));
+    if (file) {
+      sourceFiles.set(source.id, file);
+      importedFiles.set(rid, file);
+    } else {
+      pendingSources.set(rid, {
+        nodeInstanceId: source.source_local_id,
+        spaceId: source.space_id,
+        title: "",
+        spaceName: "",
+        groupId: "",
+        selected: false,
+      });
+    }
+  }
+  if (pendingSources.size > 0) {
+    await importNodes({
+      plugin,
+      selectedNodes: [...pendingSources.values()],
+      importedFiles,
+    });
+  }
+  for (const [id, rid] of sourceRids) {
+    const file = importedFiles.get(rid);
+    if (file) sourceFiles.set(id, file);
+  }
+
+  const localSpaceUri = getLocalSpaceUri(plugin.app);
+  const indexedFiles = queryEngine.getFilesWithNodeInstanceId();
+  const legacyEndpointsForFile = ({
+    file,
+    nodeInstanceId,
+  }: {
+    file: TFile;
+    nodeInstanceId: string;
+  }): string[] => {
+    // Bare IDs and vault RIDs are ambiguous when another space uses the same ID.
+    const hasOtherFile =
+      indexedFiles.some(
+        (candidate) =>
+          candidate !== file &&
+          plugin.app.metadataCache.getFileCache(candidate)?.frontmatter
+            ?.nodeInstanceId === nodeInstanceId,
+      ) ||
+      [...importedFiles].some(
+        ([rid, candidate]) =>
+          candidate !== file &&
+          ridToSpaceUriAndLocalId(rid).sourceLocalId === nodeInstanceId,
+      );
+    return hasOtherFile
+      ? []
+      : [
+          nodeInstanceId,
+          spaceUriAndLocalIdToRid(localSpaceUri, nodeInstanceId, "note"),
+        ];
+  };
+  for (const { file, nodeId, sourceDocumentId } of nodesWithSource) {
+    const sourceFile = sourceFiles.get(sourceDocumentId);
+    if (!sourceFile) {
+      const warning = `Imported ${file.basename}, but its Source is unavailable. No source relation was created.`;
+      console.warn(warning);
+      new Notice(warning);
+      continue;
+    }
+    const { frontmatter: current } = parseFrontmatter(
+      await plugin.app.vault.read(file),
+    );
+    const { frontmatter: source } = parseFrontmatter(
+      await plugin.app.vault.read(sourceFile),
+    );
+    const sourceNodeType = plugin.settings.nodeTypes.find(
+      (type) => type.id === source.nodeTypeId,
+    );
+    if (sourceNodeType?.name.toLowerCase() !== "source") continue;
+    const triple = plugin.settings.discourseRelations.find(
+      (relation) =>
+        isAcceptedSchema(relation) &&
+        relation.sourceId === current.nodeTypeId &&
+        relation.destinationId === source.nodeTypeId &&
+        plugin.settings.relationTypes.some(
+          (type) =>
+            type.id === relation.relationshipTypeId && isAcceptedSchema(type),
+        ),
+    );
+    if (!triple) continue;
+    if (typeof source.nodeInstanceId !== "string") continue;
+    const currentEndpoint = spaceUriAndLocalIdToRid(spaceUri, nodeId, "note");
+    const sourceEndpoint =
+      typeof source.importedFromRid === "string"
+        ? source.importedFromRid
+        : source.nodeInstanceId;
+    const relations = await loadRelations(plugin);
+    const currentEndpoints = [
+      currentEndpoint,
+      ...legacyEndpointsForFile({ file, nodeInstanceId: nodeId }),
+    ];
+    const sourceEndpoints = [
+      sourceEndpoint,
+      ...legacyEndpointsForFile({
+        file: sourceFile,
+        nodeInstanceId: source.nodeInstanceId,
+      }),
+    ];
+    if (
+      currentEndpoints.some((from) =>
+        sourceEndpoints.some((to) =>
+          findRelationBySourceDestinationType(
+            relations,
+            from,
+            to,
+            triple.relationshipTypeId,
+          ),
+        ),
+      )
+    )
+      continue;
+    await addRelationNoCheck(plugin, {
+      type: triple.relationshipTypeId,
+      source: currentEndpoint,
+      destination: sourceEndpoint,
+    });
+  }
+};
+
+type ImportSelectedNodesOptions = {
   plugin: DiscourseGraphPlugin;
   selectedNodes: ImportableNode[];
   onProgress?: (current: number, total: number) => void;
@@ -1257,6 +1574,21 @@ export const importSelectedNodes = async ({
     keyToRelationEndpointId: Map<string, string>;
     relationInstancesBySpace: Map<number, RemoteRelationInstance[]>;
   };
+};
+
+export const importSelectedNodes = (
+  options: ImportSelectedNodesOptions,
+): Promise<{ success: number; failed: number }> =>
+  importNodes({ ...options, importedFiles: new Map() });
+
+const importNodes = async ({
+  plugin,
+  selectedNodes,
+  onProgress,
+  precomputedData,
+  importedFiles,
+}: ImportSelectedNodesOptions & {
+  importedFiles: Map<string, TFile>;
 }): Promise<{ success: number; failed: number }> => {
   const client = await getLoggedInClient(plugin);
   if (!client) {
@@ -1284,14 +1616,13 @@ export const importSelectedNodes = async ({
     nodesBySpace.get(node.spaceId)!.push(node);
   }
 
-  const spaceUris = await getSpaceUris(client, [...nodesBySpace.keys()]);
-  const spaceNames = await getSpaceNameFromIds(client, [
+  const spaceInfoById = await getSpaceInfoFromIds(client, [
     ...nodesBySpace.keys(),
   ]);
 
   // Process each space
   for (const [spaceId, nodes] of nodesBySpace.entries()) {
-    const spaceUri = spaceUris.get(spaceId);
+    const spaceUri = spaceInfoById.get(spaceId)?.url;
     if (!spaceUri) {
       for (const _node of nodes) {
         failedCount++;
@@ -1301,14 +1632,14 @@ export const importSelectedNodes = async ({
       continue;
     }
 
-    const spaceName = spaceNames.get(spaceId) ?? `space-${spaceId}`;
+    const spaceName = spaceInfoById.get(spaceId)?.name ?? `space-${spaceId}`;
     const importFolderPath = await resolveFolderForSpaceUri({
       adapter: plugin.app.vault.adapter,
       spaceUri,
       spaceName,
     });
 
-    const nodeTypeSchemasByInstance = await fetchNodeTypeSchemasForInstances({
+    const nodeImportInfoByInstance = await fetchNodeImportInfoForInstances({
       client,
       spaceId,
       nodeInstanceIds: nodes.map((n) => n.nodeInstanceId),
@@ -1323,10 +1654,12 @@ export const importSelectedNodes = async ({
           "note",
         );
         // Check if file already exists by nodeInstanceId + importedFromRid
-        const existingFile = queryEngine.findExistingImportedFile(
-          node.nodeInstanceId,
-          importedFromRid,
-        );
+        const existingFile =
+          importedFiles.get(importedFromRid) ??
+          queryEngine.findExistingImportedFile(
+            node.nodeInstanceId,
+            importedFromRid,
+          );
 
         const nodeContent = await fetchNodeContentForImport({
           client,
@@ -1355,8 +1688,44 @@ export const importSelectedNodes = async ({
         const originalNodePath: string | undefined =
           contentFilePath ?? node.filePath;
 
-        // Sanitize file name
-        const sanitizedFileName = sanitizeFileName(fileName);
+        const nodeImportInfo = nodeImportInfoByInstance.get(
+          node.nodeInstanceId,
+        );
+
+        // Parse frontmatter from content (metadataCache is updated async and is
+        // often empty immediately after create/modify) and resolve the node type
+        // before any vault write, so a failed lookup leaves existing files untouched.
+        const { frontmatter } = parseFrontmatter(content);
+        const sourceNodeTypeId =
+          typeof frontmatter.nodeTypeId === "string"
+            ? frontmatter.nodeTypeId
+            : nodeImportInfo?.schema?.nodeTypeId;
+        if (sourceNodeTypeId === undefined) {
+          console.error(
+            `Error processing file content for node ${node.nodeInstanceId}:`,
+            "importedNode missing sourceNodeTypeId",
+          );
+          failedCount++;
+          processedCount++;
+          onProgress?.(processedCount, totalNodes);
+          continue;
+        }
+
+        const mappedNodeTypeId = await mapNodeTypeIdToLocal({
+          plugin,
+          client,
+          sourceSpaceId: spaceId,
+          sourceSpaceUri: spaceUri,
+          sourceNodeTypeId,
+        });
+
+        const localNodeType = getNodeTypeById(plugin, mappedNodeTypeId);
+        const coreTitle = nodeImportInfo?.coreTitle;
+        const decoratedTitle =
+          coreTitle !== undefined && localNodeType
+            ? decorateTitle(localNodeType.format, coreTitle)
+            : null;
+        const sanitizedFileName = sanitizeFileName(decoratedTitle ?? fileName);
         let finalFilePath: string;
 
         if (existingFile) {
@@ -1364,11 +1733,28 @@ export const importSelectedNodes = async ({
           finalFilePath = existingFile.path;
         } else {
           // Preserve source vault folder structure under import/{vaultName} when we have filePath from Content
-          const pathUnderImport =
+          const sourceFolder =
             contentFilePath && contentFilePath.includes("/")
-              ? sanitizePathForImport(contentFilePath)
-              : `${sanitizedFileName}.md`;
+              ? sanitizePathForImport(contentFilePath.replace(/\/[^/]*$/, ""))
+              : "";
+          const pathUnderImport = sourceFolder
+            ? `${sourceFolder}/${sanitizedFileName}.md`
+            : `${sanitizedFileName}.md`;
           finalFilePath = `${importFolderPath}/${pathUnderImport}`;
+
+          const desiredFilePath = finalFilePath;
+          let counter = 1;
+          let occupiedFile: TFile | null;
+          while (
+            (occupiedFile = plugin.app.vault.getFileByPath(finalFilePath))
+          ) {
+            const { frontmatter } = parseFrontmatter(
+              await plugin.app.vault.read(occupiedFile),
+            );
+            if (frontmatter.importedFromRid === importedFromRid) break;
+            finalFilePath = `${desiredFilePath.slice(0, -3)} (${counter}).md`;
+            counter++;
+          }
 
           // Ensure all parent folders exist (e.g. import/VaultName/Discourse Nodes/SubFolder)
           const dirParts = finalFilePath.split("/");
@@ -1380,12 +1766,8 @@ export const importSelectedNodes = async ({
           }
         }
 
-        // Process the file content (maps nodeTypeId, handles frontmatter, stores import timestamps)
-        // This updates existing file or creates new one
-        const result = await processFileContent({
+        const processedFile = await processFileContent({
           plugin,
-          client,
-          sourceSpaceId: spaceId,
           sourceSpaceUri: spaceUri,
           rawContent: content,
           filePath: finalFilePath,
@@ -1393,24 +1775,8 @@ export const importSelectedNodes = async ({
           importedModifiedAt: modifiedAt,
           authorId,
           nodeInstanceId: node.nodeInstanceId,
-          nodeTypeIdFromConcept: nodeTypeSchemasByInstance.get(
-            node.nodeInstanceId,
-          )?.nodeTypeId,
+          nodeTypeId: mappedNodeTypeId,
         });
-
-        if (result.error) {
-          console.error(
-            `Error processing file content for node ${node.nodeInstanceId}:`,
-            result.error,
-          );
-          failedCount++;
-          processedCount++;
-          onProgress?.(processedCount, totalNodes);
-          continue;
-        }
-
-        // typescript should not need this assertion?
-        const processedFile = result.file!;
 
         // Import assets for this node (use originalNodePath so assets go under import/{space}/ relative to note)
         const assetImportResult = await importAssetsForNode({
@@ -1446,13 +1812,20 @@ export const importSelectedNodes = async ({
           const newPath = `${currentDir}/${sanitizedFileName}.md`;
           let targetPath = newPath;
           let counter = 1;
-          while (await plugin.app.vault.adapter.exists(targetPath)) {
+          while (
+            (await plugin.app.vault.adapter.exists(targetPath)) &&
+            plugin.app.vault.getFileByPath(targetPath) !== processedFile
+          ) {
             targetPath = `${currentDir}/${sanitizedFileName} (${counter}).md`;
             counter++;
           }
-          await plugin.app.fileManager.renameFile(processedFile, targetPath);
+          if (targetPath !== processedFile.path) {
+            await plugin.app.fileManager.renameFile(processedFile, targetPath);
+          }
         }
 
+        // The metadata cache can lag behind vault writes during a batch import.
+        importedFiles.set(importedFromRid, processedFile);
         successCount++;
         processedCount++;
         onProgress?.(processedCount, totalNodes);
@@ -1462,6 +1835,22 @@ export const importSelectedNodes = async ({
         processedCount++;
         onProgress?.(processedCount, totalNodes);
       }
+    }
+
+    try {
+      await importSourceDocumentRelations({
+        plugin,
+        client,
+        localSpaceId: context.spaceId,
+        spaceUri,
+        nodeImportInfoByInstance,
+        importedFiles,
+      });
+    } catch (error) {
+      console.warn("Could not import source documents:", error);
+      new Notice(
+        "Nodes imported, but their source relations could not be imported.",
+      );
     }
 
     // Import relations where both endpoints resolve in this vault (imported or local)

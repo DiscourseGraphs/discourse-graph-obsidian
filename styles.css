@@ -113,6 +113,9 @@
 .z-\[1000\] {
   z-index: 1000;
 }
+.z-\[9999\] {
+  z-index: 9999;
+}
 .\!m-0 {
   margin: 0px !important;
 }
@@ -136,6 +139,9 @@
 }
 .mb-4 {
   margin-bottom: 1rem;
+}
+.mb-5 {
+  margin-bottom: 1.25rem;
 }
 .mb-6 {
   margin-bottom: 1.5rem;
@@ -227,6 +233,12 @@
 .table {
   display: table;
 }
+.grid {
+  display: grid;
+}
+.contents {
+  display: contents;
+}
 .hidden {
   display: none;
 }
@@ -296,6 +308,9 @@
 .max-h-\[300px\] {
   max-height: 300px;
 }
+.max-h-\[60vh\] {
+  max-height: 60vh;
+}
 .max-h-\[80vh\] {
   max-height: 80vh;
 }
@@ -319,6 +334,9 @@
 }
 .\!w-4 {
   width: 1rem !important;
+}
+.w-1\/4 {
+  width: 25%;
 }
 .w-12 {
   width: 3rem;
@@ -352,6 +370,12 @@
 }
 .w-64 {
   width: 16rem;
+}
+.w-80 {
+  width: 20rem;
+}
+.w-\[37\.5\%\] {
+  width: 37.5%;
 }
 .w-\[900px\] {
   width: 900px;
@@ -428,6 +452,12 @@
 .shrink-0 {
   flex-shrink: 0;
 }
+.table-fixed {
+  table-layout: fixed;
+}
+.border-collapse {
+  border-collapse: collapse;
+}
 .-translate-x-1\/2 {
   --tw-translate-x: -50%;
   transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
@@ -468,6 +498,9 @@
 .resize-y {
   resize: vertical;
 }
+.resize {
+  resize: both;
+}
 .list-none {
   list-style-type: none;
 }
@@ -475,6 +508,9 @@
   -webkit-appearance: none;
      -moz-appearance: none;
           appearance: none;
+}
+.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .flex-row {
   flex-direction: row;
@@ -536,6 +572,11 @@
   --tw-space-y-reverse: 0;
   margin-top: calc(0.5rem * calc(1 - var(--tw-space-y-reverse)));
   margin-bottom: calc(0.5rem * var(--tw-space-y-reverse));
+}
+.space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  --tw-space-y-reverse: 0;
+  margin-top: calc(1rem * calc(1 - var(--tw-space-y-reverse)));
+  margin-bottom: calc(1rem * var(--tw-space-y-reverse));
 }
 .overflow-hidden {
   overflow: hidden;
@@ -756,6 +797,9 @@
 .p-1 {
   padding: 0.25rem;
 }
+.p-1\.5 {
+  padding: 0.375rem;
+}
 .p-2 {
   padding: 0.5rem;
 }
@@ -853,6 +897,9 @@
 .pt-2 {
   padding-top: 0.5rem;
 }
+.pt-3 {
+  padding-top: 0.75rem;
+}
 .pt-4 {
   padding-top: 1rem;
 }
@@ -862,8 +909,14 @@
 .text-center {
   text-align: center;
 }
+.align-top {
+  vertical-align: top;
+}
 .align-middle {
   vertical-align: middle;
+}
+.align-bottom {
+  vertical-align: bottom;
 }
 .\!font-\[inherit\] {
   font-family: inherit !important;
@@ -907,6 +960,9 @@
 }
 .uppercase {
   text-transform: uppercase;
+}
+.lowercase {
+  text-transform: lowercase;
 }
 .italic {
   font-style: italic;
@@ -1090,6 +1146,11 @@
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
 }
+.transition-colors {
+  transition-property: color, background-color, border-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
 .transition-opacity {
   transition-property: opacity;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
@@ -1107,9 +1168,25 @@
 .ease-in-out {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
+.\[transform\:translateX\(-50\%\)\] {
+  transform: translateX(-50%);
+}
+
+/* tldraw otherwise caps the style panel at 148px; only the context tab needs
+   the extra width, the styling tab keeps tldraw's default proportions. */
+.tlui-style-panel:has(.dg-node-card-menu--context) {
+  width: min(20rem, calc(100vw - 1rem));
+  max-width: min(20rem, calc(100vw - 1rem));
+}
 
 .accent-border-bottom {
   border-bottom: 2px solid var(--interactive-accent) !important;
+}
+
+/* Match core status bar icon items (Sync, editor mode) instead of the
+   default .status-bar-item padding, which makes the bar taller. */
+.status-bar-item.dg-help-menu-status-bar-item {
+  padding: 0 var(--size-2-2);
 }
 
 .dg-h1 {
@@ -1179,11 +1256,10 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
   display: none !important;
 }
 
-/* Discourse tag styling in editor (colors via --dg-discourse-tag-* on the element) */
-[data-dg-discourse-tag] {
+/* Targets the parent `.cm-hashtag`, which Obsidian renders and we cannot class,
+   so this cannot be a Tailwind utility. Per-node colours are generated in tagNodeHandler.ts. */
+.cm-hashtag:has(> .dg-discourse-tag) {
   cursor: pointer;
-  background-color: var(--dg-discourse-tag-bg);
-  color: var(--dg-discourse-tag-fg);
 }
 
 /* Off-screen measure container matching DiscourseNodeShape layout */
@@ -1220,11 +1296,25 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
   border: none !important;
   box-shadow: none !important;
 }
+
+/* The reset above outranks utility classes; re-assert the node card menu's active tab styling.
+   border-radius 0 keeps the underline flat instead of bending around the button's rounded corners. */
+.tldraw__editor .dg-node-card-menu button.accent-border-bottom {
+  border-bottom: 2px solid var(--interactive-accent) !important;
+  border-radius: 0;
+  color: var(--interactive-accent);
+}
+.last\:mb-0:last-child {
+  margin-bottom: 0px;
+}
 .focus-within\:border-\[color\:var\(--background-modifier-border-focus\)\]:focus-within {
   border-color: var(--background-modifier-border-focus);
 }
 .hover\:border-\[color\:var\(--background-modifier-border-hover\)\]:hover {
   border-color: var(--background-modifier-border-hover);
+}
+.hover\:bg-\[var\(--background-modifier-hover\)\]:hover {
+  background-color: var(--background-modifier-hover);
 }
 .hover\:bg-blue-600:hover {
   --tw-bg-opacity: 1;
@@ -1257,6 +1347,9 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 }
 .hover\:\!text-error:hover {
   color: var(--text-error) !important;
+}
+.hover\:text-\[var\(--text-normal\)\]:hover {
+  color: var(--text-normal);
 }
 .hover\:text-gray-700:hover {
   --tw-text-opacity: 1;
@@ -1362,6 +1455,12 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
     --tw-bg-opacity: 1;
     background-color: rgb(31 41 55 / var(--tw-bg-opacity, 1));
   }
+}
+.\[\&\>svg\]\:h-3>svg {
+  height: 0.75rem;
+}
+.\[\&\>svg\]\:w-3>svg {
+  width: 0.75rem;
 }
 
 /* We copy the styling from tldraw/tldraw.css here due to compilation failure */
