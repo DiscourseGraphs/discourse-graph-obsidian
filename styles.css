@@ -80,11 +80,17 @@
 .left-1 {
   left: 0.25rem;
 }
+.left-full {
+  left: 100%;
+}
 .right-0 {
   right: 0px;
 }
 .right-2 {
   right: 0.5rem;
+}
+.top-0 {
+  top: 0px;
 }
 .top-1 {
   top: 0.25rem;
@@ -101,9 +107,6 @@
 .z-20 {
   z-index: 20;
 }
-.z-30 {
-  z-index: 30;
-}
 .z-50 {
   z-index: 50;
 }
@@ -112,6 +115,9 @@
 }
 .z-\[1000\] {
   z-index: 1000;
+}
+.z-\[301\] {
+  z-index: 301;
 }
 .z-\[9999\] {
   z-index: 9999;
@@ -170,6 +176,9 @@
 .mr-3 {
   margin-right: 0.75rem;
 }
+.mr-auto {
+  margin-right: auto;
+}
 .ms-1 {
   margin-inline-start: 0.25rem;
 }
@@ -214,6 +223,9 @@
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+.\!block {
+  display: block !important;
 }
 .block {
   display: block;
@@ -338,6 +350,9 @@
 .w-1\/4 {
   width: 25%;
 }
+.w-11 {
+  width: 2.75rem;
+}
 .w-12 {
   width: 3rem;
 }
@@ -413,9 +428,6 @@
 .min-w-56 {
   min-width: 14rem;
 }
-.min-w-80 {
-  min-width: 20rem;
-}
 .min-w-\[12rem\] {
   min-width: 12rem;
 }
@@ -433,9 +445,6 @@
 }
 .max-w-full {
   max-width: 100%;
-}
-.max-w-md {
-  max-width: 28rem;
 }
 .flex-1 {
   flex: 1 1 0%;
@@ -457,14 +466,6 @@
 }
 .border-collapse {
   border-collapse: collapse;
-}
-.-translate-x-1\/2 {
-  --tw-translate-x: -50%;
-  transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
-}
-.-translate-y-1\/2 {
-  --tw-translate-y: -50%;
-  transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
 }
 .transform {
   transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
@@ -580,6 +581,9 @@
 }
 .overflow-hidden {
   overflow: hidden;
+}
+.overflow-visible {
+  overflow: visible;
 }
 .overflow-x-auto {
   overflow-x: auto;
@@ -864,6 +868,10 @@
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
 }
+.py-px {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
 .pb-0 {
   padding-bottom: 0px;
 }
@@ -930,10 +938,6 @@
 .text-base {
   font-size: 1rem;
   line-height: 1.5rem;
-}
-.text-lg {
-  font-size: 1.125rem;
-  line-height: 1.75rem;
 }
 .text-sm {
   font-size: 0.875rem;
@@ -1168,6 +1172,9 @@
 .ease-in-out {
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
+.\[transform\:translate\(-50\%\2c -50\%\)\] {
+  transform: translate(-50%,-50%);
+}
 .\[transform\:translateX\(-50\%\)\] {
   transform: translateX(-50%);
 }
@@ -1366,10 +1373,6 @@ body.dg-hide-frontmatter-ids .metadata-property[data-property-key^="rel_" i] {
 }
 .hover\:text-\[var\(--text-normal\)\]:hover {
   color: var(--text-normal);
-}
-.hover\:text-gray-700:hover {
-  --tw-text-opacity: 1;
-  color: rgb(55 65 81 / var(--tw-text-opacity, 1));
 }
 .hover\:text-normal:hover {
   color: var(--text-normal);
@@ -5427,4 +5430,20 @@ kbd.tlui-kbd {
 .dg-node-search-modal .dg-search-footer-action:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* Held at full color first, so the fade isn't mostly gone before the eye lands after the scroll. */
+.dg-node-search-modal .dg-search-preview-flash {
+  animation: dg-search-preview-flash 3s ease-out;
+  border-radius: var(--radius-s);
+}
+
+@keyframes dg-search-preview-flash {
+  0%,
+  35% {
+    background-color: var(--text-highlight-bg);
+  }
+  100% {
+    background-color: transparent;
+  }
 }
