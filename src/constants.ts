@@ -34,7 +34,7 @@ export const DEFAULT_NODE_TYPES: Record<string, DiscourseNode> = {
   source: {
     id: generateUid("node"),
     name: "Source",
-    format: "SRC - {content}",
+    format: "@{content}",
     color: "#9E9E9E",
     tag: "src-candidate",
     created: now,
@@ -123,7 +123,6 @@ export const DEFAULT_SETTINGS: Settings = {
   spacePassword: undefined,
   accountLocalId: undefined,
   syncModeEnabled: false,
-  nodeCardContextMenuEnabled: false,
   spaceNames: {},
 };
 
