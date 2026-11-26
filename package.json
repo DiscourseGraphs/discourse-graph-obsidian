@@ -1,6 +1,6 @@
 {
   "name": "@discourse-graphs/obsidian",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "description": "Discourse Graph Plugin for obsidian.md",
   "main": "dist/main.js",
   "private": true,
@@ -31,7 +31,7 @@
   "dependencies": {
     "@codemirror/language": "6.12.4",
     "@codemirror/view": "6.38.8",
-    "@supabase/supabase-js": "2.105.4",
+    "@supabase/supabase-js": "2.118.0",
     "date-fns": "4.1.0",
     "nanoid": "4.0.2",
     "react": "18.2.0",
